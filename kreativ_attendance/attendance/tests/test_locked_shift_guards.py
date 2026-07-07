@@ -21,7 +21,7 @@ class TestLockedShiftGuards(unittest.TestCase):
     def test_controller_file_has_lock_guard(self):
         """The controller must define a guard helper that raises on locked save/trash."""
         import importlib.util, os
-        path = "/home/mitesh/frappe-bench-v16/apps/kreativ_attendance/kreativ_attendance/kreativ_attendance/doctype/employee_shift/employee_shift.py"
+        path = "/home/mitesh/frappe-bench-v16/apps/kreativ_attendance/kreativ_attendance/doctypes/employee_shift/employee_shift.py"
         assert os.path.exists(path), f"controller file missing at {path}"
         with open(path) as f:
             content = f.read()

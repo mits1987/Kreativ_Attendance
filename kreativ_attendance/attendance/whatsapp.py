@@ -23,11 +23,15 @@ def notify_checkin(checkin_name: str, test_mode: bool = False):
 
     c = frappe.db.get_value(
         "Employee Checkin", checkin_name,
-        ["employee", "employee_name", "log_type", "time"],
+        ["employee", "employee_name", "log_type", "time", "whatsapp_sent"],
         as_dict=True,
     )
     if not c:
         return  # deleted before the job ran
+
+    # Skip if already sent (deduplication)
+    if c.whatsapp_sent:
+        return
 
     if settings.notify_on == "IN only" and c.log_type != "IN":
         return
@@ -53,11 +57,14 @@ def notify_checkin(checkin_name: str, test_mode: bool = False):
     mobile = frappe.db.get_value("Employee", c.employee, "cell_number") or ""
     digits = "".join(filter(str.isdigit, mobile))
     if len(digits) >= 10:
-        # Format as WhatsApp ID (add India country code 91 if missing)
         if len(digits) == 10:
             digits = "91" + digits
-        chat_id = digits + "@c.us"
-        _post(settings, "send-text", {"chatId": chat_id, "text": text})
+        # Use @lid format which works with OpenWA for all numbers
+        chat_id = digits + "@lid"
+        if _post(settings, "send-text", {"chatId": chat_id, "text": text}):
+            # Mark as sent
+            frappe.db.set_value("Employee Checkin", checkin_name, "whatsapp_sent", 1, update_modified=False)
+            frappe.db.commit()
     else:
         # Fall back to admin chat_id
         if settings.chat_id:
@@ -94,7 +101,7 @@ def send_salary_slip(salary_slip: str):
     )
     period = frappe.utils.format_date(slip.start_date, "MMMM yyyy")
     _post(settings, "send-document", {
-        "chatId": f"{digits}@c.us",
+        "chatId": f"{digits}@lid",
         "base64": base64.b64encode(pdf).decode(),
         "mimetype": "application/pdf",
         "filename": f"Salary Slip {period} - {slip.employee_name}.pdf",
@@ -117,6 +124,7 @@ def _post(settings, endpoint: str, payload: dict, raise_on_error: bool = False):
             timeout=30,
         )
         r.raise_for_status()
+        return True
     except Exception:
         frappe.log_error(
             title="OpenWA WhatsApp send failed",
@@ -127,3 +135,4 @@ def _post(settings, endpoint: str, payload: dict, raise_on_error: bool = False):
                 "Could not send via OpenWA — check Base URL / API Key / session. "
                 "Details are in the Error Log."
             )
+        return False
