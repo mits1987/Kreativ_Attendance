@@ -1,0 +1,110 @@
+{
+  "doctype": "DocType",
+  "name": "OpenWA Settings",
+  "module": "Kreativ Attendance",
+  "custom": 0,
+  "issingle": 1,
+  "istable": 0,
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1
+    },
+    {
+      "role": "HR Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1
+    }
+  ],
+  "fields": [
+    {
+      "fieldname": "enabled",
+      "fieldtype": "Check",
+      "default": "0",
+      "label": "Enabled"
+    },
+    {
+      "fieldname": "base_url",
+      "fieldtype": "Data",
+      "label": "OpenWA Base URL",
+      "description": "e.g. http://localhost:2785 (where the OpenWA Docker container runs)"
+    },
+    {
+      "fieldname": "api_key",
+      "fieldtype": "Password",
+      "label": "API Key",
+      "description": "X-API-Key created in the OpenWA dashboard"
+    },
+    {
+      "fieldname": "column_break_1",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "session_id",
+      "fieldtype": "Data",
+      "default": "default",
+      "label": "Session ID",
+      "description": "The OpenWA session (WhatsApp account) to send from"
+    },
+    {
+      "fieldname": "chat_id",
+      "fieldtype": "Data",
+      "label": "Recipient Chat ID",
+      "description": "Number: 9779812345678@c.us — or a group: 1203630XXXXXXX@g.us (get group IDs from the OpenWA dashboard)"
+    },
+    {
+      "fieldname": "notify_on",
+      "fieldtype": "Select",
+      "options": "IN and OUT\nIN only\nOUT only",
+      "default": "IN and OUT",
+      "label": "Notify On"
+    },
+    {
+      "fieldname": "salary_section",
+      "fieldtype": "Section Break",
+      "label": "Salary Slip Delivery"
+    },
+    {
+      "fieldname": "send_salary_slips",
+      "fieldtype": "Check",
+      "default": "0",
+      "label": "Send Salary Slip PDF to employee on submit",
+      "description": "Sends to the employee's Mobile (cell_number on the Employee record). Verify numbers first — salary data is sensitive."
+    },
+    {
+      "fieldname": "salary_slip_print_format",
+      "fieldtype": "Link",
+      "options": "Print Format",
+      "label": "Salary Slip Print Format",
+      "description": "Leave blank for the default format"
+    },
+    {
+      "fieldname": "default_country_code",
+      "fieldtype": "Data",
+      "label": "Default Country Code",
+      "description": "Digits only, e.g. 977. Prefixed to employee mobile numbers that don't already include a country code."
+    },
+    {
+      "fieldname": "test_section",
+      "fieldtype": "Section Break",
+      "label": "Testing"
+    },
+    {
+      "fieldname": "test_mode",
+      "fieldtype": "Check",
+      "default": "0",
+      "label": "Test Mode",
+      "description": "When enabled, all WhatsApp notifications go to the Test Chat ID below instead of employee phones. Use for testing without disturbing employees."
+    },
+    {
+      "fieldname": "test_chat_id",
+      "fieldtype": "Data",
+      "label": "Test Chat ID",
+      "description": "Chat ID to receive test notifications (e.g., 919106526195@c.us for Mitesh). Only used when Test Mode is enabled.",
+      "depends_on": "eval:doc.test_mode"
+    }
+  ]
+}
