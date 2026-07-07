@@ -35,7 +35,7 @@ frappe.pages['attendance-dashboard'].on_page_load = function(wrapper) {
 			__('Create submitted Attendance records and Overtime salary entries for {0}?<br><br>Run this only after all anomalies for the month are resolved.', [period_label()]),
 			function() {
 				frappe.call({
-					method: 'gravures_custom.attendance.api.sync_month_to_hrms',
+					method: 'kreativ_attendance.attendance.api.sync_month_to_hrms',
 					args: { year: state.year, month: state.month },
 					freeze: true,
 					freeze_message: __('Creating Attendance and Overtime entries...'),
@@ -67,7 +67,7 @@ frappe.pages['attendance-dashboard'].on_page_load = function(wrapper) {
 			__('Rebuild all Employee Shift records for {0} from the raw checkins?<br>Payroll-locked employees are skipped automatically.', [period_label()]),
 			function() {
 				frappe.call({
-					method: 'gravures_custom.attendance.api.recalculate_year_month',
+					method: 'kreativ_attendance.attendance.api.recalculate_year_month',
 					args: { year: state.year, month: state.month },
 					freeze: true,
 					freeze_message: __('Re-pairing checkins...'),
@@ -119,7 +119,7 @@ frappe.pages['attendance-dashboard'].on_page_load = function(wrapper) {
 	function load() {
 		$body.html('<div class="text-muted" style="padding:30px;">' + __('Loading...') + '</div>');
 		frappe.call({
-			method: 'gravures_custom.attendance.api.month_summary',
+			method: 'kreativ_attendance.attendance.api.month_summary',
 			args: { year: state.year, month: state.month },
 			callback: function(r) { render(r.message || {}); },
 		});

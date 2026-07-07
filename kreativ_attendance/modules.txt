@@ -1,7 +1,6 @@
 attendance
 page
 report
-doctypes
 fixtures
 public
 config

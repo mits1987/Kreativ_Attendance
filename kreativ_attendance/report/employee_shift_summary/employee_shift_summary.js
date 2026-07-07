@@ -42,7 +42,7 @@ frappe.query_reports["Employee Shift Summary"] = {
 				__('Create submitted Attendance records and Overtime salary entries for {0}-{1}?<br><br>Run this only after all shifts for the month are reviewed (no orange/red rows).', [f.year, f.month]),
 				function() {
 					frappe.call({
-						method: 'gravures_custom.attendance.api.sync_month_to_hrms',
+						method: 'kreativ_attendance.attendance.api.sync_month_to_hrms',
 						args: { year: f.year, month: f.month, employee: f.employee || null },
 						freeze: true,
 						freeze_message: __('Creating Attendance and Overtime entries...'),
