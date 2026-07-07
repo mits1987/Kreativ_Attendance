@@ -59,8 +59,8 @@ def notify_checkin(checkin_name: str, test_mode: bool = False):
     if len(digits) >= 10:
         if len(digits) == 10:
             digits = "91" + digits
-        # Use @lid format which works with OpenWA for all numbers
-        chat_id = digits + "@lid"
+        # Use @c.us format to match saved WhatsApp contacts
+        chat_id = digits + "@c.us"
         if _post(settings, "send-text", {"chatId": chat_id, "text": text}):
             # Mark as sent
             frappe.db.set_value("Employee Checkin", checkin_name, "whatsapp_sent", 1, update_modified=False)
@@ -101,7 +101,7 @@ def send_salary_slip(salary_slip: str):
     )
     period = frappe.utils.format_date(slip.start_date, "MMMM yyyy")
     _post(settings, "send-document", {
-        "chatId": f"{digits}@lid",
+        "chatId": f"{digits}@c.us",
         "base64": base64.b64encode(pdf).decode(),
         "mimetype": "application/pdf",
         "filename": f"Salary Slip {period} - {slip.employee_name}.pdf",
