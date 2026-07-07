@@ -256,3 +256,64 @@ Ignores the other 9 test files. Should use discovery or explicitly load all test
 3. **No ZKTeco sync code** — the primary data source has no integration in the repo
 
 Fix the 🔴 items in ~2 hours, then pick Phase 2 and 3 enhancements based on which pain points your HR team actually reports. The architecture is clean enough that enhancements slot in naturally — add a new module in `attendance/`, wire through `hooks.py`, done.
+
+---
+
+## 7. Bug Fixes Applied (2026-07-08)
+
+### ✅ Fixed: Dead Code in whatsapp.py
+- **File:** `kreativ_attendance/attendance/whatsapp.py:76`
+- **Issue:** Duplicate `return ""` statement (unreachable code)
+- **Fix:** Removed the dead code
+
+### ✅ Fixed: Hardcoded Country Code in whatsapp.py
+- **File:** `kreativ_attendance/attendance/whatsapp.py:132-133`
+- **Issue:** `notify_checkin` hardcoded `"91"` (India) while `send_salary_slip` used configurable `settings.default_country_code`
+- **Fix:** Updated `notify_checkin` to use `settings.default_country_code` consistently
+
+### ✅ Fixed: Missing Lock Guard on Employee Shift
+- **File:** `kreativ_attendance/attendance/doctype/employee_shift/employee_shift.py`
+- **Issue:** `locked` field was read-only in UI but no server-side validation prevented API/script edits
+- **Fix:** Added `validate()` method that blocks edits on locked shifts (allows system updates via `frappe.db.set_value`)
+
+### ✅ Fixed: Shift Hours Timing Issue in OUT Punch WhatsApp Notification
+- **File:** `kreativ_attendance/attendance/whatsapp.py:14-76`
+- **Issue:** When employee checks OUT, the WhatsApp notification tried to read `worked_hours` from Employee Shift — but that shift record is created by an async recalculation job that may not have run yet. The fallback calculation used a fragile 60-second matching logic that could also fail due to timing.
+- **Fix:** Rewrote `_get_shift_hours_for_out()` to:
+  1. Still try Employee Shift first (if recalculation has already run)
+  2. Fall back to finding the last IN punch before this OUT using `frappe.db.get_value(..., order_by="time desc")` — simple, reliable, no timing issues
+- **Root Cause:** Two async background jobs (WhatsApp notification + shift recalculation) triggered by the same event, with no guaranteed execution order
+
+### ✅ Previously Fixed (by Mitesh)
+- Duplicate `doctypes/` directory removed
+- JS API paths updated from `gravures_custom.*` to `kreativ_attendance.*`
+- `modules.txt` corrected
+
+---
+
+## 8. HRMS Integration Opportunities
+
+### Use HRMS Overtime System Instead of Custom Additional Salary
+
+**Current State:**
+`hrms.py` manually creates `Additional Salary` records for overtime with a hardcoded `"Overtime"` component.
+
+**HRMS Built-in Alternative:**
+- **Overtime Type** — define rules (multipliers, hourly rate, salary component)
+- **Overtime Slip** — aggregate overtime per employee per period
+- **Payroll Entry** integration — creates overtime entries automatically
+
+**Recommended:**
+1. Configure HRMS Overtime Type with your rules
+2. Remove `_create_overtime()` from `sync_month_to_hrms`
+3. Let Payroll Entry's `create_overtime_slips()` handle overtime
+
+### Automate Monthly Payroll
+
+**Current:** Manual Payroll Entry creation each month.
+
+**Recommended:** Add a scheduled task (cron) that auto-creates Payroll Entry on the 1st of each month.
+
+### Keep Custom Pairing Logic
+
+HRMS auto-attendance requires Shift Assignments (employee → shift type). Since you don't have fixed shifts, keep your custom `pairing.py` — it handles your 20-30 hour flexible shifts better than HRMS can.

@@ -19,11 +19,12 @@ def _get_shift_hours_for_out(employee: str, checkin_time: datetime) -> str:
     For overnight shifts, the IN may be on the previous day, so we look
     for the last IN before this OUT regardless of date.
     
-    First tries to use Employee Shift's worked_hours (most accurate),
-    then falls back to calculating from checkins.
+    Strategy:
+    1. Try Employee Shift's worked_hours (most accurate, if recalculation has run)
+    2. Fall back to finding the last IN punch before this OUT
     """
     try:
-        # First try to get worked_hours from Employee Shift
+        # First try to get worked_hours from Employee Shift (if recalculation has run)
         checkin_date = checkin_time.date()
         shift = frappe.db.get_value(
             "Employee Shift",
@@ -43,36 +44,30 @@ def _get_shift_hours_for_out(employee: str, checkin_time: datetime) -> str:
         if shift:
             return shift
         
-        # Fallback: calculate from checkins
-        checkins = frappe.db.get_all(
+        # Fallback: find the last IN punch before this OUT
+        # This works even if Employee Shift hasn't been recalculated yet
+        last_in = frappe.db.get_value(
             "Employee Checkin",
-            filters={
+            {
                 "employee": employee,
-                "time": ["<=", checkin_time],
+                "log_type": "IN",
+                "time": ["<", checkin_time],
             },
-            fields=["name", "time", "log_type"],
-            order_by="time asc",
+            "time",
+            order_by="time desc",
         )
         
-        in_time = None
-        for checkin in checkins:
-            ct = checkin.time
-            if isinstance(ct, str):
-                ct = get_datetime(ct)
-            
-            if checkin.log_type == "IN":
-                in_time = ct
-            elif checkin.log_type == "OUT" and in_time:
-                if abs((ct - checkin_time).total_seconds()) < 60:
-                    total_seconds = int((ct - in_time).total_seconds())
-                    hours = int(total_seconds // 3600)
-                    minutes = int((total_seconds % 3600) // 60)
-                    return f"{hours}:{minutes:02d}"
-                in_time = None
+        if last_in:
+            if isinstance(last_in, str):
+                last_in = get_datetime(last_in)
+            total_seconds = int((checkin_time - last_in).total_seconds())
+            if total_seconds > 0:
+                hours = int(total_seconds // 3600)
+                minutes = int((total_seconds % 3600) // 60)
+                return f"{hours}:{minutes:02d}"
         
         return ""
     except Exception:
-        return ""
         return ""
 
 
@@ -129,8 +124,10 @@ def notify_checkin(checkin_name: str, test_mode: bool = False):
     mobile = frappe.db.get_value("Employee", c.employee, "cell_number") or ""
     digits = "".join(filter(str.isdigit, mobile))
     if len(digits) >= 10:
-        if len(digits) == 10:
-            digits = "91" + digits
+        # Prepend country code if not already present
+        cc = "".join(filter(str.isdigit, settings.default_country_code or ""))
+        if cc and not digits.startswith(cc) and len(digits) <= 10:
+            digits = cc + digits
         # Use @c.us format to match saved WhatsApp contacts
         chat_id = digits + "@c.us"
         if _post(settings, "send-text", {"chatId": chat_id, "text": text}):
