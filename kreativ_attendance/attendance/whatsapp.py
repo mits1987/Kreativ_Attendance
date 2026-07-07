@@ -7,7 +7,73 @@ Failures are logged (Error Log), never allowed to break the device sync.
 """
 import frappe
 import requests
-from frappe.utils import format_datetime
+from frappe.utils import format_datetime, get_datetime
+from datetime import datetime, timedelta
+
+
+def _get_shift_hours_for_out(employee: str, checkin_time: datetime) -> str:
+    """Calculate shift hours for an OUT punch by finding the matching IN.
+    
+    Returns formatted string like '8:30' or empty string if not found.
+    
+    For overnight shifts, the IN may be on the previous day, so we look
+    for the last IN before this OUT regardless of date.
+    
+    First tries to use Employee Shift's worked_hours (most accurate),
+    then falls back to calculating from checkins.
+    """
+    try:
+        # First try to get worked_hours from Employee Shift
+        checkin_date = checkin_time.date()
+        shift = frappe.db.get_value(
+            "Employee Shift",
+            {"employee": employee, "shift_date": checkin_date},
+            "worked_hours",
+        )
+        if shift:
+            return shift
+        
+        # Also check previous day for overnight shifts
+        prev_date = checkin_date - timedelta(days=1)
+        shift = frappe.db.get_value(
+            "Employee Shift",
+            {"employee": employee, "shift_date": prev_date},
+            "worked_hours",
+        )
+        if shift:
+            return shift
+        
+        # Fallback: calculate from checkins
+        checkins = frappe.db.get_all(
+            "Employee Checkin",
+            filters={
+                "employee": employee,
+                "time": ["<=", checkin_time],
+            },
+            fields=["name", "time", "log_type"],
+            order_by="time asc",
+        )
+        
+        in_time = None
+        for checkin in checkins:
+            ct = checkin.time
+            if isinstance(ct, str):
+                ct = get_datetime(ct)
+            
+            if checkin.log_type == "IN":
+                in_time = ct
+            elif checkin.log_type == "OUT" and in_time:
+                if abs((ct - checkin_time).total_seconds()) < 60:
+                    total_seconds = int((ct - in_time).total_seconds())
+                    hours = int(total_seconds // 3600)
+                    minutes = int((total_seconds % 3600) // 60)
+                    return f"{hours}:{minutes:02d}"
+                in_time = None
+        
+        return ""
+    except Exception:
+        return ""
+        return ""
 
 
 def notify_checkin(checkin_name: str, test_mode: bool = False):
@@ -44,6 +110,12 @@ def notify_checkin(checkin_name: str, test_mode: bool = False):
         c.employee_name or c.employee,
         format_datetime(c.time, "dd-MM-yyyy HH:mm"),
     )
+    
+    # Add shift hours for OUT punches
+    if c.log_type == "OUT":
+        shift_hours = _get_shift_hours_for_out(c.employee, c.time)
+        if shift_hours:
+            text = "{0} shift hours: {1}".format(text, shift_hours)
 
     # Test mode: only send to admin chat_id
     if test_mode or settings.test_mode:
