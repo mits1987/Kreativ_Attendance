@@ -137,7 +137,9 @@ def notify_checkin(checkin_name: str, test_mode: bool = False):
     else:
         # Fall back to admin chat_id
         if settings.chat_id:
-            _post(settings, "send-text", {"chatId": settings.chat_id, "text": text})
+            if _post(settings, "send-text", {"chatId": settings.chat_id, "text": text}):
+                frappe.db.set_value("Employee Checkin", checkin_name, "whatsapp_sent", 1, update_modified=False)
+                frappe.db.commit()
 
 
 def send_salary_slip(salary_slip: str):
@@ -192,6 +194,11 @@ def _post(settings, endpoint: str, payload: dict, raise_on_error: bool = False):
             headers={"X-API-Key": api_key},
             timeout=30,
         )
+        if not r.ok:
+            frappe.log_error(
+                title=f"OpenWA HTTP {r.status_code}",
+                message=f"URL: {url}\nStatus: {r.status_code}\nResponse: {r.text[:500]}\nPayload chatId: {payload.get('chatId', 'N/A')}",
+            )
         r.raise_for_status()
         return True
     except Exception:
