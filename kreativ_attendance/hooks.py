@@ -29,7 +29,8 @@ doc_events = {
 scheduler_events = {
     "cron": {
         "*/5 * * * *": [
-            "kreativ_attendance.attendance.openwa_health.check_openwa_session"
+            "kreativ_attendance.attendance.openwa_health.check_openwa_session",
+            "kreativ_attendance.attendance.zkteco_sync.scheduled_sync",
         ],
         "*/10 * * * *": [
             "kreativ_attendance.attendance.whatsapp.retry_missed_notifications"
