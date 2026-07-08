@@ -45,13 +45,14 @@ def _get_shift_hours_for_out(employee: str, checkin_time: datetime) -> str:
             return shift
         
         # Fallback: find the last IN punch before this OUT
-        # This works even if Employee Shift hasn't been recalculated yet
+        # Only look back 24 hours to avoid matching stale INs from days ago
+        cutoff = checkin_time - timedelta(hours=24)
         last_in = frappe.db.get_value(
             "Employee Checkin",
             {
                 "employee": employee,
                 "log_type": "IN",
-                "time": ["<", checkin_time],
+                "time": ["between", [cutoff, checkin_time]],
             },
             "time",
             order_by="time desc",
