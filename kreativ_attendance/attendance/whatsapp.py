@@ -215,7 +215,7 @@ def retry_missed_notifications():
     Runs every 10 minutes via scheduler_events.
     Only processes checkins from the last 24 hours to avoid ancient retries.
     """
-    settings = frappe.get_single_doc("OpenWA Settings")
+    settings = frappe.get_single("OpenWA Settings")
     if not (settings.enabled and settings.base_url):
         return
 
