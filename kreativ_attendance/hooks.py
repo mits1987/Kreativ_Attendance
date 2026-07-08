@@ -30,6 +30,9 @@ scheduler_events = {
     "cron": {
         "*/5 * * * *": [
             "kreativ_attendance.attendance.openwa_health.check_openwa_session"
+        ],
+        "*/10 * * * *": [
+            "kreativ_attendance.attendance.whatsapp.retry_missed_notifications"
         ]
     }
 }

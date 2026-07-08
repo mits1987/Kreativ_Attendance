@@ -205,3 +205,49 @@ def _post(settings, endpoint: str, payload: dict, raise_on_error: bool = False):
                 "Details are in the Error Log."
             )
         return False
+
+
+def retry_missed_notifications():
+    """Scheduled job: find Employee Checkins where whatsapp_sent was never
+    set to 1 and retry sending. Catches notifications lost to worker
+    crashes, module load errors, or transient OpenWA failures.
+
+    Runs every 10 minutes via scheduler_events.
+    Only processes checkins from the last 24 hours to avoid ancient retries.
+    """
+    settings = frappe.get_single_doc("OpenWA Settings")
+    if not (settings.enabled and settings.base_url):
+        return
+
+    cutoff = get_datetime() - timedelta(hours=24)
+    unsent = frappe.get_all(
+        "Employee Checkin",
+        filters=[
+            ["whatsapp_sent", "!=", 1],
+            ["creation", ">=", cutoff],
+        ],
+        fields=["name", "employee_name", "log_type", "creation"],
+        order_by="creation asc",
+        limit_page_length=50,
+    )
+
+    if not unsent:
+        return
+
+    sent_count = 0
+    for c in unsent:
+        try:
+            # Reuse the same notify_checkin logic
+            from kreativ_attendance.attendance.whatsapp import notify_checkin
+            notify_checkin(c.name)
+            sent_count += 1
+        except Exception:
+            frappe.log_error(
+                title=f"WhatsApp retry failed for {c.name}",
+                message=frappe.get_traceback(),
+            )
+
+    if sent_count:
+        frappe.logger().info(
+            f"WhatsApp retry: sent {sent_count}/{len(unsent)} missed notifications"
+        )
