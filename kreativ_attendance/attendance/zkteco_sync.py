@@ -9,7 +9,6 @@ from frappe import _
 from frappe.utils import today, now_datetime, get_datetime
 from datetime import timedelta
 import requests
-import json
 
 
 def get_jwt_token():
@@ -40,14 +39,17 @@ def get_jwt_token():
         pass
 
     # Fallback to basic token endpoint
-    resp = requests.post(
-        f"http://{server_ip}:{server_port}/api-token-auth/",
-        json={"username": username, "password": password},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    token = resp.json().get("token", "")
-    return token, "Token"
+    try:
+        resp = requests.post(
+            f"http://{server_ip}:{server_port}/api-token-auth/",
+            json={"username": username, "password": password},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        token = resp.json().get("token", "")
+        return token, "Token"
+    except Exception as e:
+        frappe.throw(_("Could not authenticate with ZKTeco server: {0}").format(str(e)))
 
 
 def fetch_zkteco_transactions(cfg, start_time, end_time, token=None, token_type="Token"):
@@ -125,7 +127,8 @@ def find_employee_by_code(emp_code):
 
 
 def create_employee_checkin(transaction):
-    """Create Employee Checkin record from a ZKTeco transaction."""
+    """Create Employee Checkin record from a ZKTeco transaction.
+    Returns 'new' if created, 'skip' if already exists, False on error."""
     try:
         emp_code = transaction.get("emp_code")
         punch_time = transaction.get("punch_time")
@@ -153,7 +156,7 @@ def create_employee_checkin(transaction):
             punch_datetime = punch_time
 
         log_type = "IN"
-        if punch_state == "1":
+        if str(punch_state) == "1":
             log_type = "OUT"
 
         # Check if checkin already exists (by employee + time + device)
@@ -162,7 +165,7 @@ def create_employee_checkin(transaction):
             {"employee": employee, "time": punch_datetime, "device_id": device_id},
         )
         if existing_checkin:
-            return True
+            return "skip"
 
         # Also check by transaction ID proximity
         if transaction_id:
@@ -179,7 +182,7 @@ def create_employee_checkin(transaction):
                 "name",
             )
             if existing_by_id:
-                return True
+                return "skip"
 
         checkin = frappe.get_doc(
             {
@@ -194,9 +197,8 @@ def create_employee_checkin(transaction):
             }
         )
         checkin.insert(ignore_permissions=True)
-        frappe.db.commit()
 
-        return True
+        return "new"
 
     except Exception as e:
         frappe.log_error(f"Error creating Employee Checkin: {str(e)}", "ZKTeco Checkin Creation")
@@ -207,17 +209,9 @@ def sync_zkteco_transactions():
     """Main sync — fetches punches from last 7 days and creates Employee Checkins."""
     cfg = frappe.get_single("ZKTeco Config")
     if not cfg.enable_sync:
-        frappe.log_error("ZKTeco sync is disabled", "ZKTeco Sync")
-        return
-
-    if not cfg.token:
-        frappe.log_error("ZKTeco token not configured", "ZKTeco Sync")
         return
 
     try:
-        last_sync = frappe.db.get_single_value("ZKTeco Config", "last_sync") or (
-            now_datetime() - timedelta(hours=1)
-        )
         current_time = now_datetime()
 
         # 7-day lookback from start of today to catch missed punches
@@ -232,13 +226,17 @@ def sync_zkteco_transactions():
         transactions = fetch_zkteco_transactions(cfg, lookback_start, current_time, token, token_type)
 
         if transactions:
-            processed_count = 0
+            new_count = 0
+            skip_count = 0
             error_count = 0
 
             for transaction in transactions:
                 try:
-                    if create_employee_checkin(transaction):
-                        processed_count += 1
+                    result = create_employee_checkin(transaction)
+                    if result == "new":
+                        new_count += 1
+                    elif result == "skip":
+                        skip_count += 1
                     else:
                         error_count += 1
                 except Exception as e:
@@ -248,15 +246,12 @@ def sync_zkteco_transactions():
                         "ZKTeco Sync Error",
                     )
 
-            total_synced = frappe.db.get_single_value("ZKTeco Config", "total_synced_records") or 0
+            # Update last sync time and commit everything together
             frappe.db.set_single_value("ZKTeco Config", "last_sync", current_time)
-            frappe.db.set_single_value(
-                "ZKTeco Config", "total_synced_records", total_synced + processed_count
-            )
             frappe.db.commit()
 
             frappe.logger().info(
-                f"ZKTeco Sync completed: {processed_count} processed, {error_count} errors"
+                f"ZKTeco Sync completed: {new_count} new, {skip_count} skipped, {error_count} errors"
             )
         else:
             frappe.logger().info("ZKTeco Sync: No transactions found in lookback window")
