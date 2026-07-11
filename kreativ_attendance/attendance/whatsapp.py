@@ -187,7 +187,7 @@ def notify_checkin(checkin_name: str, test_mode: bool = False):
     # The health check tracks consecutive failures. After 3 failures,
     # it trips the breaker and enters exponential backoff. We respect
     # that here to avoid hammering a down service and wasting retries.
-    if frappe.cache().get_value("openwa_failure_streak", 0) >= 3:
+    if (frappe.cache().get_value("openwa_failure_streak") or 0) >= 3:
         frappe.log_error(
             title="WhatsApp Notify Skipped — Circuit Breaker",
             message=(
@@ -469,7 +469,7 @@ def retry_missed_notifications():
     # The health check tracks consecutive failures. After 3 failures,
     # it trips the breaker and enters exponential backoff. We respect
     # that here to avoid hammering a down service.
-    if frappe.cache().get_value("openwa_failure_streak", 0) >= 3:
+    if (frappe.cache().get_value("openwa_failure_streak") or 0) >= 3:
         frappe.log_error(
             title="WhatsApp Retry Skipped — Circuit Breaker",
             message=(
