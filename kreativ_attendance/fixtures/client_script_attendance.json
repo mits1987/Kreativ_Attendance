@@ -9,5 +9,16 @@
     "module": "Kreativ Attendance",
     "enabled": 0,
     "script": "// Row color highlighting + Recalculate Month button\nfrappe.listview_settings['Employee Shift'] = {\n    refresh(listview) {\n        listview.wrapper.find('.list-row').each(function() {\n            const row = $(this);\n            const indicator = row.find('.indicator-pill').text().trim();\n            if (indicator === 'Anomaly' || indicator.includes('Break punch')) {\n                row.css('background-color', '#ffe6e6');\n            } else if (indicator === 'Missing Check-Out' || indicator.includes('Unpaired')) {\n                row.css('background-color', '#fff4e6');\n            } else if (indicator === 'Paired') {\n                row.css('background-color', '#e6f9ed');\n            } else if (indicator === 'Manual') {\n                row.css('background-color', '#e6eef9');\n            }\n        });\n    }\n};\n"
+  },
+  {
+    "doctype": "Client Script",
+    "name": "Employee Shift Form Formatter",
+    "dt": "Client Script",
+    "script_type": "Form",
+    "applied_to": "Employee Shift",
+    "view": "Form",
+    "module": "Kreativ Attendance",
+    "enabled": 1,
+    "script": "// Formatter for Employee Shift — color-renders the status field and worked_hours.\n// Bound via the doctype's __init__.py get_formatter_dict/indicator functions.\n\nfrappe.ui.form.on('Employee Shift', {\n    refresh(frm) {\n        const s = frm.doc.status;\n        const r = (frm.doc.anomaly_reason || '').toLowerCase();\n        const wrap = frm.fields_dict.status.$wrapper;\n\n        const colors = {\n            'Paired': '#29cd41',\n            'Missing Check-Out': '#ff9b00',\n            'Anomaly': '#ff4d4d',\n            'Manual': '#5b9bd5',\n        };\n        const key = (s === 'Anomaly' && r === 'break_punch') ? 'Anomaly' : s;\n        const color = colors[key] || 'inherit';\n\n        // Highlight the status pill itself\n        wrap.find('.field-area').first().attr('style', `font-weight:bold;color:${color};font-size:1.05em;`);\n\n        // Widen worked hours / overtime if exhausted\n        if (s === 'Paired' && frm.doc.overtime_seconds > 0) {\n            const wt = (frm.doc.overtime_hours || '').split(':');\n            const minutes = parseInt(wt[0],10)*60 + parseInt(wt[1]||'0',10);\n            frm.fields_dict.overtime_hours.$wrapper.attr('style',\n                minutes > 300\n                    ? 'background:#fff4e6;padding:4px 8px;font-weight:bold;'  // > 5h overtime\n                    : 'background:#e6f9ed;padding:4px 8px;'\n            );\n        }\n    }\n});\n"
   }
 ]

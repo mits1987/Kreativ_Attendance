@@ -38,6 +38,22 @@ scheduler_events = {
     }
 }
 
+# Custom Fields to create on target doctypes
+custom_fields = {
+    "Employee Checkin": [
+        {
+            "fieldname": "whatsapp_sent",
+            "label": "WhatsApp Sent",
+            "fieldtype": "Check",
+            "insert_after": "log_type",
+            "read_only": 1,
+            "no_copy": 1,
+            "default": 0,
+            "description": "Set to 1 when WhatsApp notification has been sent for this checkin",
+        }
+    ]
+}
+
 # Fixtures
 fixtures = [
     {"dt": "Client Script", "filters": [["module", "=", "Kreativ Attendance"]]},
