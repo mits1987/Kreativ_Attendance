@@ -1,4 +1,9 @@
-"""Document-event hooks for Employee Checkin and Salary Slip."""
+"""Document-event hooks for Employee Checkin and Salary Slip.
+
+Fix #4: Added on_checkin_rollback to detect when the ZKTeco sync's
+transaction is rolled back, logging the lost checkins so we can
+investigate and retry them later.
+"""
 import frappe
 from frappe.utils import get_datetime
 from frappe.utils.background_jobs import enqueue
@@ -162,3 +167,38 @@ def on_salary_slip_submit(doc, method=None):
         )
 
     frappe.db.commit()
+
+
+def on_checkin_rollback(doc, method=None):
+    """FIX #4: Detect when an Employee Checkin transaction is rolled back.
+
+    When the ZKTeco sync creates multiple checkins in a single transaction,
+    if ANY checkin fails (e.g., duplicate), the entire transaction can be
+    rolled back. This means:
+        - All checkins in that batch are lost (not committed)
+        - All enqueue_after_commit hooks are lost
+        - No notifications are sent for any of those checkins
+
+    This handler logs the lost checkins so we can:
+        1. Investigate what went wrong
+        2. Manually retry if needed
+        3. Ensure retry_missed_notifications picks them up
+
+    The checkin is still in memory (doc object) even though it won't be
+    committed to the database. We log the details for debugging.
+    """
+    try:
+        frappe.log_error(
+            title="Employee Checkin Transaction Rolled Back",
+            message=(
+                f"Checkin {doc.name} for employee {doc.employee} "
+                f"({doc.employee_name}) at {doc.time} was rolled back. "
+                f"Log type: {doc.log_type}. "
+                f"This usually means the ZKTeco sync transaction failed "
+                f"mid-batch. The checkin will NOT be in the database and "
+                f"no notification will be sent. Check ZKTeco sync logs for "
+                f"the root cause."
+            ),
+        )
+    except Exception:
+        pass  # Don't let logging errors propagate

@@ -1,9 +1,72 @@
-"""OpenWA Health Check - runs every 5 minutes via scheduler"""
+"""OpenWA Health Check - runs every 5 minutes via scheduler.
+
+Also performs module cache validation (Fix #1) to prevent the
+"Module attendance not found" error that killed all notifications
+on 2026-07-11.
+"""
 import frappe
 import requests
 from frappe.utils import get_datetime, now
 from datetime import datetime, timezone
 import time
+
+
+def _validate_module_cache():
+	"""Validate that the Frappe module cache is not stale.
+
+	FIX #1: On 2026-07-11, a stale Redis cache caused "Module attendance
+	not found" which killed ALL WhatsApp notifications for the entire day.
+	This function detects and fixes that by:
+
+	1. Checking if 'attendance' module resolves to 'kreativ_attendance'
+	2. If not, clearing the app_modules cache and rebuilding the map
+	3. Logging the fix so we can detect recurrence
+
+	This runs every 5 minutes as part of the health check.
+	"""
+	try:
+		# Check if the attendance module resolves correctly
+		app = frappe.local.module_app.get("attendance")
+		if app == "kreativ_attendance":
+			return  # Cache is healthy
+
+		# Cache is stale or missing — rebuild it aggressively
+		frappe.cache().delete_value("app_modules")
+		frappe.client_cache.delete_value("installed_app_modules")
+		# Clear ALL controller caches (not just the current site)
+		# This prevents "Module import failed" errors from cached lookups
+		frappe.controllers.clear()
+		# Also clear the doctype_python_modules cache
+		import frappe.modules.utils
+		frappe.modules.utils.doctype_python_modules.clear()
+		frappe.setup_module_map()
+
+		# Verify the fix
+		app_after = frappe.local.module_app.get("attendance")
+		if app_after == "kreativ_attendance":
+			frappe.log_error(
+				title="Module Cache Rebuilt",
+				message=(
+					"Stale module cache detected and fixed. "
+					f"attendance module now maps to: {app_after}. "
+					"Previous value: " + (app or "None") + ". "
+					"This was the root cause of notification failures on 2026-07-11."
+				),
+			)
+		else:
+			frappe.log_error(
+				title="Module Cache Rebuild Failed",
+				message=(
+					f"attendance module still not found after cache rebuild. "
+					f"Current mapping: {app_after}. "
+					f"Check kreativ_attendance/modules.txt exists and has 'attendance'."
+				),
+			)
+	except Exception as e:
+		frappe.log_error(
+			title="Module Cache Validation Error",
+			message=str(e),
+		)
 
 
 def _session_is_stale(settings, data: dict) -> bool:
@@ -46,7 +109,7 @@ def _restart_session(settings) -> dict:
 		if r.status_code not in (200, 204):
 			frappe.log_error(
 				title="OpenWA Session Stop Failed",
-				f"Stop returned {r.status_code}: {r.text[:200]}",
+				message=f"Stop returned {r.status_code}: {r.text[:200]}",
 			)
 			return {"status": "stale", "reason": f"Stop returned {r.status_code}"}
 	except Exception as e:
@@ -108,8 +171,15 @@ def check_openwa_session():
 	"""
 	Scheduled job: runs every 5 minutes to verify OpenWA session is healthy.
 	If session is disconnected, restarts the OpenWA service via supervisor.
+
+	Also validates the module cache (Fix #1) to prevent "Module attendance
+	not found" errors that kill all notifications.
 	"""
 	try:
+		# Fix #1: Validate module cache before anything else.
+		# If the cache is stale, notifications will fail with "Module not found".
+		_validate_module_cache()
+
 		settings = frappe.get_cached_doc("OpenWA Settings")
 		if not settings.enabled:
 			return {"status": "skipped", "reason": "OpenWA not enabled"}

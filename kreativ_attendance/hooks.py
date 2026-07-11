@@ -44,13 +44,23 @@ custom_fields = {
         {
             "fieldname": "whatsapp_sent",
             "label": "WhatsApp Sent",
-            "fieldtype": "Check",
+            "fieldtype": "Int",
             "insert_after": "log_type",
             "read_only": 1,
             "no_copy": 1,
             "default": 0,
-            "description": "Set to 1 when WhatsApp notification has been sent for this checkin",
-        }
+            "description": "0=not sent, 1=sent, 2=failed (retry), 3=invalid number (stop)",
+        },
+        {
+            "fieldname": "whatsapp_retry_count",
+            "label": "WhatsApp Retry Count",
+            "fieldtype": "Int",
+            "insert_after": "whatsapp_sent",
+            "read_only": 1,
+            "no_copy": 1,
+            "default": 0,
+            "description": "Number of times WhatsApp send has been attempted",
+        },
     ]
 }
 
