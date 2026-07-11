@@ -19,16 +19,36 @@ def on_checkin_trashed(doc, method=None):
 
 
 def on_checkin_created(doc, method=None):
-    """after_insert only — WhatsApp-notify NEW punches, never edits/recalcs."""
+    """after_insert only — WhatsApp-notify NEW punches, never edits/recalcs.
+
+    The enqueue is wrapped in try/except because after_insert has NO
+    try/except in Frappe core (document.py line 482). An uncaught exception
+    here propagates through insert() → create_employee_checkin() (zkteco_sync),
+    and even though the checkin row is already db_inserted by then, the
+    transaction can still be rolled back depending on error path. Falling
+    through silently means retry_missed_notifications (cron */10) will pick
+    the checkin up later — never lose a notification to a transient enqueue
+    failure.
+    """
     if not frappe.db.get_single_value("OpenWA Settings", "enabled"):
         return
-    enqueue(
-        "kreativ_attendance.attendance.whatsapp.notify_checkin",
-        queue="short",
-        timeout=60,
-        checkin_name=doc.name,
-        enqueue_after_commit=True,
-    )
+    try:
+        enqueue(
+            "kreativ_attendance.attendance.whatsapp.notify_checkin",
+            queue="short",
+            timeout=60,
+            checkin_name=doc.name,
+            enqueue_after_commit=True,
+        )
+    except Exception:
+        frappe.log_error(
+            title="WhatsApp enqueue failed on checkin creation",
+            message=(
+                f"After-commit enqueue of notify_checkin failed for {doc.name}. "
+                "retry_missed_notifications will retry within 10 minutes "
+                "(only filters whatsapp_sent in [0, None])."
+            ),
+        )
 
 
 def _enqueue_recalc(doc):

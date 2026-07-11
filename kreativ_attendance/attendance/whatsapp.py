@@ -134,11 +134,18 @@ def notify_checkin(checkin_name: str, test_mode: bool = False):
             # Mark as sent
             frappe.db.set_value("Employee Checkin", checkin_name, "whatsapp_sent", 1, update_modified=False)
             frappe.db.commit()
+        else:
+            # Mark as permanently failed so retry doesn't loop forever
+            frappe.db.set_value("Employee Checkin", checkin_name, "whatsapp_sent", 2, update_modified=False)
+            frappe.db.commit()
     else:
         # Fall back to admin chat_id
         if settings.chat_id:
             if _post(settings, "send-text", {"chatId": settings.chat_id, "text": text}):
                 frappe.db.set_value("Employee Checkin", checkin_name, "whatsapp_sent", 1, update_modified=False)
+                frappe.db.commit()
+            else:
+                frappe.db.set_value("Employee Checkin", checkin_name, "whatsapp_sent", 2, update_modified=False)
                 frappe.db.commit()
 
 
@@ -192,7 +199,7 @@ def _post(settings, endpoint: str, payload: dict, raise_on_error: bool = False):
             url,
             json=payload,
             headers={"X-API-Key": api_key},
-            timeout=30,
+            timeout=10,
         )
         if not r.ok:
             frappe.log_error(
@@ -214,6 +221,19 @@ def _post(settings, endpoint: str, payload: dict, raise_on_error: bool = False):
         return False
 
 
+def send_text(settings: "frappe.model.document.Document", text: str, raise_on_error: bool = False) -> bool:
+    """Send a plain text message to the admin chat_id.
+
+    Used by the Send Test Message button on OpenWA Settings.
+    Returns True on success, False on failure.
+    """
+    if not settings.chat_id:
+        frappe.msgprint("Set Recipient Chat ID in OpenWA Settings and Save first.")
+        return False
+    return _post(settings, "send-text", {"chatId": settings.chat_id, "text": text},
+                 raise_on_error=raise_on_error)
+
+
 def retry_missed_notifications():
     """Scheduled job: find Employee Checkins where whatsapp_sent was never
     set to 1 and retry sending. Catches notifications lost to worker
@@ -226,13 +246,38 @@ def retry_missed_notifications():
     if not (settings.enabled and settings.base_url):
         return
 
+    # Skip retry if health check reports stale session
+    if frappe.cache().get_value("openwa_session_stale"):
+        frappe.log_error(
+            title="OpenWA Retry Skipped",
+            message="Session is stale (lastActive > 60 min). Check Error Log for 'OpenWA Session Stale'.",
+        )
+        return
+
     cutoff = get_datetime() - timedelta(hours=24)
+    # Periodic reset of permanent failures from the last 7 days. A row that
+    # failed during an outage gets another shot every cron */10 once the
+    # session is healthy — bounded to a 7-day window so we don't churn ancient
+    # rows. The stale-session flag above blocks this reset when the gateway
+    # is known-broken, so we don't ping-pong failures.
+    perm_fail_cutoff = get_datetime() - timedelta(days=7)
+    frappe.db.sql(
+        """
+        UPDATE `tabEmployee Checkin`
+        SET whatsapp_sent = 0
+        WHERE whatsapp_sent = 2
+          AND creation >= %s
+        """,
+        (perm_fail_cutoff,),
+    )
+    frappe.db.commit()
+
     unsent = frappe.get_all(
         "Employee Checkin",
-        filters=[
-            ["whatsapp_sent", "!=", 1],
-            ["creation", ">=", cutoff],
-        ],
+        filters={
+            "whatsapp_sent": ["in", [0, None]],
+            "creation": [">=", cutoff],
+        },
         fields=["name", "employee_name", "log_type", "creation"],
         order_by="creation asc",
         limit_page_length=50,

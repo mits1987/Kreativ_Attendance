@@ -7,6 +7,7 @@ Public entrypoints:
     recalculate_around(employee, time) -> dict      (checkin deleted; doc gone)
 """
 from datetime import date, datetime, timedelta
+import time
 import frappe
 from frappe.utils import get_datetime
 
@@ -81,6 +82,13 @@ def delete_existing_shifts(year: int, month: int, employee: str = None,
     window (needed to *pair* cross-month checkins) must never widen the delete —
     otherwise a May recalc destroys June 1-2 shifts it will not recreate.
 
+    Lock contention: when a ZKTeco batch sync triggers recalcs for many
+    employees in the same minute, parallel workers can fight for Employee
+    Shift row locks and hit MySQL's Lock-wait-timeout. Retry with exponential
+    backoff (up to 5 attempts) so a single transient lock wait doesn't fail
+    the whole rebuild — the request just stalls slightly longer and the
+    parallel counterpart finishes its commit.
+
     No commit here: recalculate_period commits once after the rebuild, so a
     failed rebuild rolls the deletes back instead of losing the month.
     """
@@ -101,9 +109,21 @@ def delete_existing_shifts(year: int, month: int, employee: str = None,
     names = frappe.db.get_all("Employee Shift", filters=filters, pluck="name")
     if not names:
         return 0
-    for n in names:
-        frappe.delete_doc("Employee Shift", n, ignore_permissions=True)
-    return len(names)
+
+    # Retry the per-row delete on lock-wait timeouts. exponential backoff.
+    max_attempts = 5
+    for attempt in range(max_attempts):
+        try:
+            for n in names:
+                frappe.delete_doc("Employee Shift", n, ignore_permissions=True)
+            return len(names)
+        except frappe.exceptions.QueryTimeoutError:
+            if attempt == max_attempts - 1:
+                raise
+            wait = 0.5 * (2 ** attempt)  # 0.5s, 1s, 2s, 4s, 8s
+            time.sleep(wait)
+            frappe.db.rollback()
+    return 0
 
 
 def create_shift_record(employee, paired_shift) -> str:
