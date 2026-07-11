@@ -183,6 +183,21 @@ def notify_checkin(checkin_name: str, test_mode: bool = False):
     if not (settings.enabled and settings.base_url):
         return
 
+    # --- Circuit Breaker: Skip if OpenWA is known down ---
+    # The health check tracks consecutive failures. After 3 failures,
+    # it trips the breaker and enters exponential backoff. We respect
+    # that here to avoid hammering a down service and wasting retries.
+    if frappe.cache().get_value("openwa_failure_streak", 0) >= 3:
+        frappe.log_error(
+            title="WhatsApp Notify Skipped — Circuit Breaker",
+            message=(
+                f"Checkin {checkin_name} not sent — circuit breaker tripped. "
+                f"OpenWA health check failed {frappe.cache().get_value('openwa_failure_streak')} times. "
+                f"Retry will run when health check recovers."
+            ),
+        )
+        return
+
     # --- Load Checkin ---
     c = frappe.db.get_value(
         "Employee Checkin", checkin_name,
@@ -447,6 +462,21 @@ def retry_missed_notifications():
         frappe.log_error(
             title="OpenWA Retry Skipped",
             message="Session is stale (lastActive > 60 min). Check Error Log for 'OpenWA Session Stale'.",
+        )
+        return
+
+    # --- Circuit Breaker: Skip if OpenWA is known down ---
+    # The health check tracks consecutive failures. After 3 failures,
+    # it trips the breaker and enters exponential backoff. We respect
+    # that here to avoid hammering a down service.
+    if frappe.cache().get_value("openwa_failure_streak", 0) >= 3:
+        frappe.log_error(
+            title="WhatsApp Retry Skipped — Circuit Breaker",
+            message=(
+                f"OpenWA health check failed {frappe.cache().get_value('openwa_failure_streak')} times. "
+                f"Circuit breaker open — skipping retry to avoid hammering down service. "
+                f"Will retry when health check recovers."
+            ),
         )
         return
 

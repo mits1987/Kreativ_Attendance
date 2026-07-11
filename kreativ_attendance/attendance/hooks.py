@@ -13,7 +13,12 @@ from kreativ_attendance.attendance.service import recalculate_around
 
 def on_checkin_updated(doc, method=None):
     """Triggered after any Employee Checkin save/edit — rebuild that
-    employee's shifts for the affected month(s)."""
+    employee's shifts for the affected month(s).
+
+    FIX: This now ONLY handles recalculation. WhatsApp notification is
+    handled separately in on_checkin_created to avoid duplicate enqueues
+    on create (both after_insert and on_change fire on create).
+    """
     _enqueue_recalc(doc)
 
 

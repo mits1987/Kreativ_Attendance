@@ -3,12 +3,22 @@
 Also performs module cache validation (Fix #1) to prevent the
 "Module attendance not found" error that killed all notifications
 on 2026-07-11.
+
+Circuit Breaker:
+    Tracks consecutive health check failures. After 3 consecutive failures,
+    trips the breaker and enters exponential backoff (5min, 10min, 20min...)
+    to avoid hammering a down OpenWA instance. Reset on first success.
 """
 import frappe
 import requests
 from frappe.utils import get_datetime, now
 from datetime import datetime, timezone
 import time
+
+
+# Circuit breaker configuration
+CIRCUIT_BREAKER_THRESHOLD = 3  # consecutive failures before tripping
+MAX_BACKOFF_MINUTES = 60       # cap backoff at 1 hour
 
 
 def _validate_module_cache():
@@ -37,7 +47,6 @@ def _validate_module_cache():
 		# This prevents "Module import failed" errors from cached lookups
 		frappe.controllers.clear()
 		# Also clear the doctype_python_modules cache
-		import frappe.modules.utils
 		frappe.modules.utils.doctype_python_modules.clear()
 		frappe.setup_module_map()
 
@@ -67,6 +76,43 @@ def _validate_module_cache():
 			title="Module Cache Validation Error",
 			message=str(e),
 		)
+
+
+# --- Circuit Breaker Helpers ---
+
+def _get_failure_streak() -> int:
+	"""Get consecutive health check failure count from cache."""
+	val = frappe.cache().get_value("openwa_failure_streak")
+	return int(val) if val else 0
+
+
+def _increment_failure_streak() -> int:
+	"""Increment failure streak and return new value."""
+	streak = _get_failure_streak() + 1
+	frappe.cache().set_value("openwa_failure_streak", streak, expires_in_sec=86400)
+	return streak
+
+
+def _reset_failure_streak():
+	"""Reset failure streak on successful health check."""
+	frappe.cache().delete_value("openwa_failure_streak")
+
+
+def _is_breaker_tripped() -> bool:
+	"""Check if circuit breaker is active (too many consecutive failures)."""
+	return _get_failure_streak() >= CIRCUIT_BREAKER_THRESHOLD
+
+
+def _calculate_backoff_minutes() -> int:
+	"""Calculate exponential backoff in minutes based on failure streak.
+
+	Streak 3 -> 5 min, 4 -> 10 min, 5 -> 20 min, 6 -> 40 min, 7+ -> 60 min (capped)
+	"""
+	streak = _get_failure_streak()
+	if streak < CIRCUIT_BREAKER_THRESHOLD:
+		return 5  # default interval
+	backoff_minutes = 5 * (2 ** (streak - CIRCUIT_BREAKER_THRESHOLD))
+	return min(backoff_minutes, MAX_BACKOFF_MINUTES)
 
 
 def _session_is_stale(settings, data: dict) -> bool:
@@ -174,7 +220,30 @@ def check_openwa_session():
 
 	Also validates the module cache (Fix #1) to prevent "Module attendance
 	not found" errors that kill all notifications.
+
+	Circuit Breaker: Tracks consecutive failures. After 3 failures, trips
+	and enters exponential backoff (5min, 10min, 20min...) to avoid
+	hammering a down OpenWA instance. Reset on first success.
 	"""
+	# --- Circuit Breaker: Short-circuit if too many consecutive failures ---
+	if _is_breaker_tripped():
+		backoff = _calculate_backoff_minutes()
+		frappe.log_error(
+			title="OpenWA Circuit Breaker Open",
+			message=(
+				f"Health check skipped — circuit breaker tripped after "
+				f"{_get_failure_streak()} consecutive failures. "
+				f"Backing off for {backoff} minutes. "
+				f"Next check will retry health check."
+			),
+		)
+		return {
+			"status": "circuit_open",
+			"failure_streak": _get_failure_streak(),
+			"backoff_minutes": backoff,
+			"checked": now(),
+		}
+
 	try:
 		# Fix #1: Validate module cache before anything else.
 		# If the cache is stale, notifications will fail with "Module not found".
@@ -182,6 +251,8 @@ def check_openwa_session():
 
 		settings = frappe.get_cached_doc("OpenWA Settings")
 		if not settings.enabled:
+			# OpenWA disabled — reset streak and return
+			_reset_failure_streak()
 			return {"status": "skipped", "reason": "OpenWA not enabled"}
 
 		base_url = settings.base_url.rstrip("/") if settings.base_url else ""
@@ -189,6 +260,7 @@ def check_openwa_session():
 		session_id = settings.session_id or "default"
 
 		if not base_url or not api_key:
+			_increment_failure_streak()
 			return {"status": "error", "reason": "Missing base_url or api_key in settings"}
 
 		# 1. Check HTTP endpoint
@@ -226,6 +298,7 @@ def check_openwa_session():
 				if result.get("status") == "recovered":
 					# Retry unsent messages now that session is back
 					_retry_unsent()
+					_reset_failure_streak()
 					return {
 						"status": "recovered",
 						"session": status,
@@ -246,6 +319,9 @@ def check_openwa_session():
 				)
 				return {"status": "stale", "session": status, "lastActive": data.get("lastActive")}
 
+			# Session is healthy — reset failure streak
+			_reset_failure_streak()
+
 		except Exception as e:
 			return _restart_openwa(f"Session check failed: {e}")
 
@@ -260,12 +336,14 @@ def check_openwa_session():
 		return {"status": "healthy", "session": status, "checked": now()}
 
 	except Exception as e:
+		_increment_failure_streak()
 		frappe.log_error(f"OpenWA health check error: {e}", "OpenWA Health Check")
 		return {"status": "error", "reason": str(e)}
 
 
 def _restart_openwa(reason: str):
 	"""Restart OpenWA via supervisor and log the action"""
+	_increment_failure_streak()
 	frappe.log_error(
 		f"OpenWA restarted by health check: {reason}",
 		"OpenWA Auto-Restart"
