@@ -310,14 +310,10 @@ def check_openwa_session():
 	# blocks all recovery attempts indefinitely.
 	if _is_breaker_tripped() and not _can_attempt_probe():
 		backoff = _calculate_backoff_minutes()
-		frappe.log_error(
-			title="OpenWA Circuit Breaker Open",
-			message=(
-				f"Health check skipped — circuit breaker tripped after "
-				f"{_get_failure_streak()} consecutive failures. "
-				f"Backing off for {backoff} minutes. "
-				f"Next check will retry health check."
-			),
+		frappe.logger().info(
+			f"OpenWA Circuit Breaker Open — Health check skipped. "
+			f"{_get_failure_streak()} consecutive failures, "
+			f"backing off for {backoff} minutes."
 		)
 		return {
 			"status": "circuit_open",

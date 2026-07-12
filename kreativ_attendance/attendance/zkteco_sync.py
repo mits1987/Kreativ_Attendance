@@ -4,6 +4,10 @@ Employee Checkin records in ERPNext.
 Moved here from zkteco_checkins_sync so the logic lives in kreativ_attendance.
 The ZKTeco Config doctype stays in zkteco_checkins_sync (already in DB).
 """
+import base64
+import json
+import time
+
 import frappe
 from frappe import _
 from frappe.utils import today, now_datetime, get_datetime
@@ -11,9 +15,47 @@ from datetime import timedelta
 import requests
 
 
+JWT_CACHE_KEY = "zkteco_jwt_token"
+
+
+def _get_jwt_payload(token: str) -> dict:
+    """Decode JWT payload (middle segment) without cryptographic verification.
+    Returns dict or empty dict on failure."""
+    try:
+        segments = token.split(".")
+        if len(segments) < 2:
+            return {}
+        payload = segments[1]
+        # Fix base64url padding
+        padding = 4 - len(payload) % 4
+        if padding != 4:
+            payload += "=" * padding
+        return json.loads(base64.urlsafe_b64decode(payload))
+    except Exception:
+        return {}
+
+
+def _cache_jwt_token(token: str, token_type: str):
+    """Store JWT in Frappe cache with TTL matching the token's exp claim.
+    Falls back to 23 hours if exp can't be decoded."""
+    ttl = 23 * 3600  # default fallback
+    payload = _get_jwt_payload(token)
+    exp = payload.get("exp")
+    if exp:
+        ttl = max(300, int(exp) - int(time.time()) - 120)  # 2 min safety buffer
+    frappe.cache().set_value(JWT_CACHE_KEY, {"token": token, "type": token_type}, expires_in_sec=ttl)
+
+
 def get_jwt_token():
-    """Get a fresh JWT access token from EasyTime Pro using stored credentials.
-    Returns (token, token_type) tuple where token_type is 'JWT' or 'Token'."""
+    """Get a JWT access token, cached across sync cycles.
+
+    Returns (token, token_type) tuple where token_type is 'JWT' or 'Token'.
+    Checks Frappe cache first; only fetches from EasyTime Pro when the
+    cached token has expired."""
+    cached = frappe.cache().get_value(JWT_CACHE_KEY)
+    if cached:
+        return cached["token"], cached["type"]
+
     cfg = frappe.get_single("ZKTeco Config")
     server_ip = cfg.server_ip
     server_port = cfg.server_port
@@ -34,6 +76,7 @@ def get_jwt_token():
             data = resp.json()
             access = data.get("access", "")
             if access:
+                _cache_jwt_token(access, "JWT")
                 return access, "JWT"
     except Exception:
         pass
@@ -47,6 +90,7 @@ def get_jwt_token():
         )
         resp.raise_for_status()
         token = resp.json().get("token", "")
+        _cache_jwt_token(token, "Token")
         return token, "Token"
     except Exception as e:
         frappe.throw(_("Could not authenticate with ZKTeco server: {0}").format(str(e)))

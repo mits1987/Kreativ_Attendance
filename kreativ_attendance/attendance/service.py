@@ -82,12 +82,11 @@ def delete_existing_shifts(year: int, month: int, employee: str = None,
     window (needed to *pair* cross-month checkins) must never widen the delete —
     otherwise a May recalc destroys June 1-2 shifts it will not recreate.
 
-    Lock contention: when a ZKTeco batch sync triggers recalcs for many
-    employees in the same minute, parallel workers can fight for Employee
-    Shift row locks and hit MySQL's Lock-wait-timeout. Retry with exponential
-    backoff (up to 5 attempts) so a single transient lock wait doesn't fail
-    the whole rebuild — the request just stalls slightly longer and the
-    parallel counterpart finishes its commit.
+    Uses a single bulk SQL DELETE instead of per-doc frappe.delete_doc().
+    Hook-free by design: Employee Shift has no custom-coded hooks in this
+    app, and a bulk recalc is a system-internal operation, not user-triggered.
+
+    Retries with exponential backoff on lock-wait timeouts (up to 5 attempts).
 
     No commit here: recalculate_period commits once after the rebuild, so a
     failed rebuild rolls the deletes back instead of losing the month.
@@ -97,26 +96,36 @@ def delete_existing_shifts(year: int, month: int, employee: str = None,
         datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)
     )
 
-    filters = [
-        ["shift_date", ">=", period_start.date()],
-        ["shift_date", "<", period_end.date()],
+    # Build WHERE clause parts
+    conditions = [
+        "shift_date >= %(period_start)s",
+        "shift_date < %(period_end)s",
     ]
+    params = {
+        "period_start": period_start.date(),
+        "period_end": period_end.date(),
+    }
     if employee:
-        filters = [["employee", "=", employee]] + filters
+        conditions.append("employee = %(employee)s")
+        params["employee"] = employee
     if exclude_employees:
-        filters.append(["employee", "not in", list(exclude_employees)])
+        conditions.append("employee NOT IN %(excluded)s")
+        params["excluded"] = list(exclude_employees)
 
-    names = frappe.db.get_all("Employee Shift", filters=filters, pluck="name")
-    if not names:
+    where_clause = " AND ".join(conditions)
+    count_sql = f"SELECT COUNT(*) FROM `tabEmployee Shift` WHERE {where_clause}"
+    count = frappe.db.sql(count_sql, params)[0][0]
+    if not count:
         return 0
 
-    # Retry the per-row delete on lock-wait timeouts. exponential backoff.
+    delete_sql = f"DELETE FROM `tabEmployee Shift` WHERE {where_clause}"
+
+    # Retry on lock-wait timeouts with exponential backoff
     max_attempts = 5
     for attempt in range(max_attempts):
         try:
-            for n in names:
-                frappe.delete_doc("Employee Shift", n, ignore_permissions=True)
-            return len(names)
+            frappe.db.sql(delete_sql, params)
+            return count
         except frappe.exceptions.QueryTimeoutError:
             if attempt == max_attempts - 1:
                 raise
@@ -146,6 +155,73 @@ def create_shift_record(employee, paired_shift) -> str:
     })
     doc.insert(ignore_permissions=True)
     return doc.name
+
+
+# ---------------------------------------------------------------------------
+# Bulk insert — used by recalculate_period for performance
+# ---------------------------------------------------------------------------
+
+_SHIFT_FIELDS = [
+    "employee", "shift_date", "check_in", "check_out",
+    "worked_hours", "overtime_hours", "worked_seconds", "overtime_seconds",
+    "standard_hours", "check_in_record", "check_out_record",
+    "status", "anomaly_reason",
+]
+
+
+def _bulk_insert_shifts(emp: str, standard: float,
+                        paired_shifts: list, anomalies: list,
+                        year: int, month: int):
+    """Insert all Employee Shift records for one employee in a single bulk INSERT.
+
+    Paired shifts and anomaly rows are inserted together.  Returns
+    (paired_count, anomaly_count).
+    """
+    values = []
+
+    for p in paired_shifts:
+        p["standard_hours"] = standard / 3600.0
+        values.append((
+            emp,
+            p["shift_date"],
+            p["check_in_time"],
+            p.get("check_out_time"),
+            format_hhmm(p["total_seconds"]),
+            format_hhmm(p["overtime_seconds"]),
+            p["total_seconds"],
+            p["overtime_seconds"],
+            p.get("standard_hours", 8.0),
+            p.get("check_in_name"),
+            p.get("check_out_name"),
+            "Paired" if p.get("check_out_time") else "Missing Check-Out",
+            "" if p.get("check_out_time") else "missing_checkout",
+        ))
+
+    for a in anomalies:
+        a_time = a["time"]
+        if not (a_time.year == year and a_time.month == month):
+            continue
+        values.append((
+            emp,
+            a_time.date() if hasattr(a_time, "date") else a_time,
+            a_time if a.get("log_type") == "IN" else None,
+            a_time if a.get("log_type") == "OUT" else None,
+            "",
+            "",
+            0,
+            0,
+            standard / 3600.0 if standard else 8,
+            a.get("checkin_name") if a.get("log_type") == "IN" else None,
+            a.get("checkin_name") if a.get("log_type") == "OUT" else None,
+            "Anomaly",
+            _map_anomaly_reason(a.get("reason", "")),
+        ))
+
+    if not values:
+        return 0, 0
+
+    frappe.db.bulk_insert("Employee Shift", _SHIFT_FIELDS, values)
+    return len(paired_shifts), len(values) - len(paired_shifts)
 
 
 def has_active_lock(employee: str, year: int, month: int) -> bool:
@@ -227,35 +303,9 @@ def recalculate_period(year: int, month: int, employee: str = None) -> dict:
             period_month=month,
         )
 
-        for p in paired:
-            p["standard_hours"] = standard / 3600.0
-            create_shift_record(emp, p)
-            total_paired += 1
-
-        # Anomalies: persist as separate Employee Shift with status = "Anomaly".
-        # Only for the target month — checkins from the ±2 day fetch window
-        # belong to the adjacent month's recalc, and persisting them here
-        # creates phantom anomaly rows at month edges.
-        for a in anomalies:
-            a_time = a["time"]
-            if not (a_time.year == year and a_time.month == month):
-                continue
-            doc = frappe.get_doc({
-                "doctype": "Employee Shift",
-                "employee": emp,
-                "shift_date": a["time"].date() if hasattr(a["time"], "date") else a["time"],
-                "check_in": a["time"] if a.get("log_type") == "IN" else None,
-                "check_out": a["time"] if a.get("log_type") == "OUT" else None,
-                "worked_hours": "",
-                "overtime_hours": "",
-                "standard_hours": standard / 3600.0 if standard else 8,
-                "status": "Anomaly",
-                "anomaly_reason": _map_anomaly_reason(a.get("reason", "")),
-                "check_in_record": a.get("checkin_name") if a.get("log_type") == "IN" else None,
-                "check_out_record": a.get("checkin_name") if a.get("log_type") == "OUT" else None,
-            })
-            doc.insert(ignore_permissions=True)
-            total_anomalies += 1
+        pc, ac = _bulk_insert_shifts(emp, standard, paired, anomalies, year, month)
+        total_paired += pc
+        total_anomalies += ac
 
     frappe.db.commit()
     return {
