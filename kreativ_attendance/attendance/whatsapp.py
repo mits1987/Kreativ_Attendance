@@ -183,20 +183,14 @@ def notify_checkin(checkin_name: str, test_mode: bool = False):
     if not (settings.enabled and settings.base_url):
         return
 
-    # --- Circuit Breaker: Skip if OpenWA is known down ---
+    # --- Circuit Breaker: Rate-limit sends when OpenWA is known down ---
     # The health check tracks consecutive failures. After 3 failures,
-    # it trips the breaker and enters exponential backoff. We respect
-    # that here to avoid hammering a down service and wasting retries.
-    if (frappe.cache().get_value("openwa_failure_streak") or 0) >= 3:
-        frappe.log_error(
-            title="WhatsApp Notify Skipped — Circuit Breaker",
-            message=(
-                f"Checkin {checkin_name} not sent — circuit breaker tripped. "
-                f"OpenWA health check failed {frappe.cache().get_value('openwa_failure_streak')} times. "
-                f"Retry will run when health check recovers."
-            ),
-        )
-        return
+    # it trips the breaker and enters exponential backoff.  Instead of
+    # blocking all sends, we allow ONE probe per backoff period so that
+    # recovery happens automatically when OpenWA comes back online.
+    from kreativ_attendance.attendance.openwa_health import _can_attempt_probe
+    if not _can_attempt_probe():
+        return  # silent skip — probe already attempted recently
 
     # --- Load Checkin ---
     c = frappe.db.get_value(
@@ -465,41 +459,29 @@ def retry_missed_notifications():
         )
         return
 
-    # --- Circuit Breaker: Skip if OpenWA is known down ---
-    # The health check tracks consecutive failures. After 3 failures,
-    # it trips the breaker and enters exponential backoff. We respect
-    # that here to avoid hammering a down service.
-    if (frappe.cache().get_value("openwa_failure_streak") or 0) >= 3:
-        frappe.log_error(
-            title="WhatsApp Retry Skipped — Circuit Breaker",
-            message=(
-                f"OpenWA health check failed {frappe.cache().get_value('openwa_failure_streak')} times. "
-                f"Circuit breaker open — skipping retry to avoid hammering down service. "
-                f"Will retry when health check recovers."
-            ),
-        )
-        return
-
     # --- Reset retryable failures (status 2 → 0) ---
-    # Checkins that failed during an outage get another chance. But only
-    # if they're from the last 7 days — older failures stay as-is.
+    # Only reset when circuit breaker is NOT tripped.  Status=2 means the
+    # send actually attempted and failed — evidence OpenWA may be down.
+    # Don't reset them while the breaker is active to avoid a wasted
+    # reset → enqueue → fail → reset cycle.
     # NOTE: This does NOT touch status 3 (permanently failed).
-    cutoff = get_datetime() - timedelta(hours=24)
     perm_fail_cutoff = get_datetime() - timedelta(days=7)
-    frappe.db.sql(
-        """
-        UPDATE `tabEmployee Checkin`
-        SET whatsapp_sent = 0
-        WHERE whatsapp_sent = 2
-          AND creation >= %s
-        """,
-        (perm_fail_cutoff,),
-    )
-    frappe.db.commit()
+    if (frappe.cache().get_value("openwa_failure_streak") or 0) < 3:
+        frappe.db.sql(
+            """
+            UPDATE `tabEmployee Checkin`
+            SET whatsapp_sent = 0
+            WHERE whatsapp_sent = 2
+              AND creation >= %s
+            """,
+            (perm_fail_cutoff,),
+        )
+        frappe.db.commit()
 
     # --- Find unsent checkins ---
     # Look for checkins with status 0 (never attempted) or NULL from
     # the last 24 hours. Order by creation ascending (oldest first).
+    cutoff = get_datetime() - timedelta(hours=24)
     unsent = frappe.get_all(
         "Employee Checkin",
         filters={

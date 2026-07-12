@@ -8,8 +8,16 @@ Circuit Breaker:
     Tracks consecutive health check failures. After 3 consecutive failures,
     trips the breaker and enters exponential backoff (5min, 10min, 20min...)
     to avoid hammering a down OpenWA instance. Reset on first success.
+
+Shared Session Safety:
+    kreativ316 and kreativ216 share the same OpenWA gateway and session.
+    Auto-restart of the gateway process is DISABLED in health checks to
+    prevent one site from killing the other's connection.  Only session-level
+    recovery (stop/start via API) is attempted automatically.  Gateway
+    restarts must be done manually via `supervisorctl restart openwa`.
 """
 import frappe
+import random
 import requests
 from frappe.utils import get_datetime, now
 from datetime import datetime, timezone
@@ -17,8 +25,9 @@ import time
 
 
 # Circuit breaker configuration
-CIRCUIT_BREAKER_THRESHOLD = 3  # consecutive failures before tripping
-MAX_BACKOFF_MINUTES = 60       # cap backoff at 1 hour
+CIRCUIT_BREAKER_THRESHOLD = 3   # consecutive failures before tripping
+MAX_BACKOFF_MINUTES = 60        # cap backoff at 1 hour
+MAX_BREAKER_DURATION_MINUTES = 60  # hard ceiling: auto-reset breaker after this
 
 
 def _validate_module_cache():
@@ -63,12 +72,16 @@ def _validate_module_cache():
 				),
 			)
 		else:
+			# Rebuild didn't fix it — directly set the mapping as fallback.
+			# frappe.setup_module_map() sometimes fails to rebuild
+			# frappe.local.module_app in certain Redis-cache-corruption scenarios.
+			frappe.local.module_app["attendance"] = "kreativ_attendance"
 			frappe.log_error(
-				title="Module Cache Rebuild Failed",
+				title="Module Cache Force-Fixed",
 				message=(
-					f"attendance module still not found after cache rebuild. "
-					f"Current mapping: {app_after}. "
-					f"Check kreativ_attendance/modules.txt exists and has 'attendance'."
+					"Rebuild failed — directly set module_app['attendance'] = kreativ_attendance. "
+					f"Previous mapping: {app or 'None'}. "
+					"This is a workaround for frappe.setup_module_map() not rebuilding correctly."
 				),
 			)
 	except Exception as e:
@@ -90,12 +103,17 @@ def _increment_failure_streak() -> int:
 	"""Increment failure streak and return new value."""
 	streak = _get_failure_streak() + 1
 	frappe.cache().set_value("openwa_failure_streak", streak, expires_in_sec=86400)
+	# Record when the breaker first tripped (for hard ceiling auto-reset)
+	if streak == CIRCUIT_BREAKER_THRESHOLD:
+		frappe.cache().set_value("openwa_breaker_tripped_at", str(get_datetime()), expires_in_sec=86400)
 	return streak
 
 
 def _reset_failure_streak():
 	"""Reset failure streak on successful health check."""
 	frappe.cache().delete_value("openwa_failure_streak")
+	frappe.cache().delete_value("openwa_breaker_tripped_at")
+	frappe.cache().delete_value("openwa_last_probe_time")
 
 
 def _is_breaker_tripped() -> bool:
@@ -113,6 +131,67 @@ def _calculate_backoff_minutes() -> int:
 		return 5  # default interval
 	backoff_minutes = 5 * (2 ** (streak - CIRCUIT_BREAKER_THRESHOLD))
 	return min(backoff_minutes, MAX_BACKOFF_MINUTES)
+
+
+def _can_attempt_probe() -> bool:
+	"""Check if we can attempt an operation given the circuit breaker state.
+
+	If breaker is not tripped: always allow.
+	If breaker is tripped:
+	  1. Hard ceiling: if breaker has been tripped for >MAX_BREAKER_DURATION_MINUTES,
+	     force-reset and allow (prevents indefinite lockdown).
+	  2. Otherwise: allow only if backoff period (with jitter) has elapsed since
+	     the last probe attempt.
+
+	This replaces the old hard-block with a rate-limited probe so that:
+	  - Most jobs skip fast (no wasted retries)
+	  - One probe per backoff period actually tries OpenWA
+	  - Recovery happens as soon as OpenWA is reachable again
+	  - Breaker auto-resets after hard ceiling (prevents deadlock)
+	"""
+	if not _is_breaker_tripped():
+		return True
+
+	# --- Hard ceiling: auto-reset if breaker tripped too long ---
+	breaker_tripped_at = frappe.cache().get_value("openwa_breaker_tripped_at")
+	if breaker_tripped_at:
+		try:
+			elapsed_minutes = (get_datetime() - get_datetime(breaker_tripped_at)).total_seconds() / 60
+			if elapsed_minutes > MAX_BREAKER_DURATION_MINUTES:
+				_reset_failure_streak()
+				frappe.log_error(
+					title="OpenWA Circuit Breaker Auto-Reset",
+					message=(
+						f"Breaker was tripped for {elapsed_minutes:.0f} minutes "
+						f"(>{MAX_BREAKER_DURATION_MINUTES} min ceiling). "
+						f"Force-resetting to allow recovery probe."
+					),
+				)
+				frappe.cache().set_value("openwa_last_probe_time", str(get_datetime()))
+				return True
+		except Exception:
+			pass
+
+	# --- Rate-limited probe: one attempt per jittered backoff period ---
+	last_probe = frappe.cache().get_value("openwa_last_probe_time")
+	if not last_probe:
+		frappe.cache().set_value("openwa_last_probe_time", str(get_datetime()))
+		return True
+
+	backoff = _calculate_backoff_minutes()
+	# Add jitter (60%-140% of backoff) to prevent thundering herd when
+	# multiple sites/workers retry simultaneously
+	jittered_backoff = backoff * random.uniform(0.6, 1.4)
+	try:
+		elapsed = (get_datetime() - get_datetime(last_probe)).total_seconds() / 60
+	except Exception:
+		elapsed = jittered_backoff + 1  # can't parse → allow probe
+
+	if elapsed >= jittered_backoff:
+		frappe.cache().set_value("openwa_last_probe_time", str(get_datetime()))
+		return True
+
+	return False
 
 
 def _session_is_stale(settings, data: dict) -> bool:
@@ -225,8 +304,11 @@ def check_openwa_session():
 	and enters exponential backoff (5min, 10min, 20min...) to avoid
 	hammering a down OpenWA instance. Reset on first success.
 	"""
-	# --- Circuit Breaker: Short-circuit if too many consecutive failures ---
-	if _is_breaker_tripped():
+	# --- Circuit Breaker: Probe periodically instead of hard-blocking ---
+	# When the breaker is tripped, we still allow ONE health check per
+	# backoff period.  This prevents the deadlock where the breaker
+	# blocks all recovery attempts indefinitely.
+	if _is_breaker_tripped() and not _can_attempt_probe():
 		backoff = _calculate_backoff_minutes()
 		frappe.log_error(
 			title="OpenWA Circuit Breaker Open",
@@ -243,6 +325,7 @@ def check_openwa_session():
 			"backoff_minutes": backoff,
 			"checked": now(),
 		}
+	# If breaker is tripped but probe is due, fall through to actual check
 
 	try:
 		# Fix #1: Validate module cache before anything else.
@@ -267,9 +350,19 @@ def check_openwa_session():
 		try:
 			r = requests.get(f"{base_url}/", timeout=10)
 			if r.status_code != 200:
-				return _restart_openwa(f"HTTP {r.status_code}")
+				_increment_failure_streak()
+				frappe.log_error(
+					title="OpenWA Health Check Failed",
+					message=f"HTTP {r.status_code} from {base_url}. Gateway may be down — restart manually if persistent.",
+				)
+				return {"status": "error", "reason": f"HTTP {r.status_code}"}
 		except Exception as e:
-			return _restart_openwa(f"HTTP check failed: {e}")
+			_increment_failure_streak()
+			frappe.log_error(
+				title="OpenWA Health Check Failed",
+				message=f"HTTP check failed: {e}. Gateway may be down — restart manually if persistent.",
+			)
+			return {"status": "error", "reason": f"HTTP check failed: {e}"}
 
 		# 2. Check session status
 		try:
@@ -279,17 +372,23 @@ def check_openwa_session():
 				timeout=10
 			)
 			if r.status_code != 200:
-				return _restart_openwa(f"Session API {r.status_code}")
+				_increment_failure_streak()
+				frappe.log_error(
+					title="OpenWA Health Check Failed",
+					message=f"Session API returned {r.status_code}. Restart manually if persistent.",
+				)
+				return {"status": "error", "reason": f"Session API {r.status_code}"}
 
 			data = r.json()
 			status = data.get("status", "")
 
 			if status not in ["ready", "connected"]:
+				_increment_failure_streak()
 				frappe.log_error(
-					f"OpenWA session unhealthy: {status}",
-					"OpenWA Health Check"
+					title="OpenWA Session Unhealthy",
+					message=f"Session status: {status}. Restart manually if persistent.",
 				)
-				return _restart_openwa(f"Session status: {status}")
+				return {"status": "error", "reason": f"Session status: {status}"}
 
 			# Check for stale session (lastActive > 60 min ago)
 			if _session_is_stale(settings, data):
@@ -323,7 +422,12 @@ def check_openwa_session():
 			_reset_failure_streak()
 
 		except Exception as e:
-			return _restart_openwa(f"Session check failed: {e}")
+			_increment_failure_streak()
+			frappe.log_error(
+				title="OpenWA Health Check Failed",
+				message=f"Session check failed: {e}. Restart manually if persistent.",
+			)
+			return {"status": "error", "reason": f"Session check failed: {e}"}
 
 		# 3. Retry any missed notifications now that session is confirmed healthy
 		_retry_unsent()
@@ -342,7 +446,15 @@ def check_openwa_session():
 
 
 def _restart_openwa(reason: str):
-	"""Restart OpenWA via supervisor and log the action"""
+	"""Restart OpenWA via supervisor (MANUAL USE ONLY).
+
+	⚠️  DANGER: In a shared-gateway setup (kreativ316 + kreativ216 both
+	using the same OpenWA instance), restarting the gateway kills ALL
+	active sessions.  This function is kept for manual/admin use only.
+	Health checks now log errors and let a human decide to restart.
+
+	Use: `bench --site kreativ316 execute kreativ_attendance.attendance.openwa_health._restart_openwa --args '["manual restart"]'`
+	"""
 	_increment_failure_streak()
 	frappe.log_error(
 		f"OpenWA restarted by health check: {reason}",
