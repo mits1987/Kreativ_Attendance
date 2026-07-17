@@ -11,6 +11,11 @@
   "session_id",
   "chat_id",
   "notify_on",
+  "section_break_session",
+  "session_status",
+  "session_qr",
+  "session_phone",
+  "session_pushname",
   "salary_section",
   "send_salary_slips",
   "salary_slip_print_format",
@@ -63,6 +68,39 @@
    "options": "IN and OUT\nIN only\nOUT only"
   },
   {
+   "fieldname": "section_break_session",
+   "fieldtype": "Section Break",
+   "label": "Session Status & QR Code"
+  },
+  {
+   "default": "unknown",
+   "description": "Current connection status of the WhatsApp session",
+   "fieldname": "session_status",
+   "fieldtype": "Select",
+   "label": "Session Status",
+   "options": "ready\nconnected\nqr_ready\ndisconnected\ncreated\nunknown\nerror",
+   "read_only": 1
+  },
+  {
+   "fieldname": "session_qr",
+   "fieldtype": "HTML",
+   "label": "QR Code (scan with WhatsApp on phone)",
+   "options": "<p class='text-muted'>Save settings and reload to load QR code. Status must be 'qr_ready' or 'disconnected'.</p>",
+   "read_only": 1
+  },
+  {
+   "fieldname": "session_phone",
+   "fieldtype": "Data",
+   "label": "Linked Phone",
+   "read_only": 1
+  },
+  {
+   "fieldname": "session_pushname",
+   "fieldtype": "Data",
+   "label": "WhatsApp Name",
+   "read_only": 1
+  },
+  {
    "fieldname": "salary_section",
    "fieldtype": "Section Break",
    "label": "Salary Slip Delivery"
@@ -109,9 +147,9 @@
  ],
  "issingle": 1,
  "links": [],
- "modified": "2026-07-08 00:00:56.878751",
+ "modified": "2026-07-13 08:00:00.000000",
  "modified_by": "Administrator",
- "module": "attendance",
+ "module": "Kreativ Attendance",
  "name": "OpenWA Settings",
  "owner": "Administrator",
  "permissions": [

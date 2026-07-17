@@ -106,7 +106,7 @@ def month_summary(year: int = None, month: int = None) -> dict:
         frappe.throw(_("Both year and month are required"))
 
     from kreativ_attendance.attendance.pairing import format_hhmm
-    from kreativ_attendance.kreativ_attendance.report.employee_shift_summary.employee_shift_summary import (
+    from kreativ_attendance.report.employee_shift_summary.employee_shift_summary import (
         execute as run_summary_report,
     )
 

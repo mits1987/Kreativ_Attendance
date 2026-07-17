@@ -70,7 +70,13 @@ fixtures = [
     {"dt": "Workspace", "filters": [["module", "=", "Kreativ Attendance"]]},
 ]
 
-# Update website context
-update_website_context = [
-    "kreativ_attendance.login_marker.update_website_context"
+# Patches
+patches = [
+    "kreativ_attendance.patches.v16_0.add_openwa_settings_fields"
 ]
+
+# Update website context
+# kreativ_attendance doesn't need its own login_marker - gravures_custom provides the environment banner
+# update_website_context = [
+#     "kreativ_attendance.login_marker.update_website_context"
+# ]

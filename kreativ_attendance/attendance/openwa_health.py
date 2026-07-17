@@ -1,20 +1,30 @@
 """OpenWA Health Check - runs every 5 minutes via scheduler.
 
-Also performs module cache validation (Fix #1) to prevent the
-"Module attendance not found" error that killed all notifications
-on 2026-07-11.
+Circuit Breaker (per-site):
+    Tracks consecutive health check failures PER SITE using scoped cache keys
+    (openwa:streak:{site}). After 3 consecutive failures, trips the breaker
+    and enters exponential backoff (5min, 10min, 20min...) to avoid hammering
+    a down OpenWA instance. Reset on first success.
 
-Circuit Breaker:
-    Tracks consecutive health check failures. After 3 consecutive failures,
-    trips the breaker and enters exponential backoff (5min, 10min, 20min...)
-    to avoid hammering a down OpenWA instance. Reset on first success.
+Auto-Recovery:
+    1. Session 404 (lost/deleted) -> Auto-creates a new session on OpenWA,
+       updates Frappe settings, starts the session, and logs a prominent
+       error: "QR SCAN NEEDED" for admin to re-link WhatsApp.
+    2. Session "created"/"disconnected" -> Auto-starts via POST /start
+       (works when multi-device credentials still exist on disk).
+    3. Session stale (lastActive > 60 min) -> Stop/start cycle via API.
+    4. Session "ready"/"connected" -> Healthy, reset breaker.
 
-Shared Session Safety:
-    kreativ316 and kreativ216 share the same OpenWA gateway and session.
+Per-Site Isolation (2026-07-13):
+    Each site (kreativ216, kreativ316) now has its own OpenWA session
+    and circuit breaker state.  One site's session going down no longer
+    affects the other.
+
+Gateway Safety:
     Auto-restart of the gateway process is DISABLED in health checks to
-    prevent one site from killing the other's connection.  Only session-level
-    recovery (stop/start via API) is attempted automatically.  Gateway
-    restarts must be done manually via `supervisorctl restart openwa`.
+    prevent one site from killing the other's connection.  Gateway
+    restarts must be done manually via 'sudo supervisorctl restart openwa'.
+    The gateway is now managed by supervisor for automatic crash recovery.
 """
 import frappe
 import random
@@ -23,102 +33,23 @@ from frappe.utils import get_datetime, now
 from datetime import datetime, timezone
 import time
 
+# Circuit breaker — shared with gravures_custom via consolidated module
+from gravures_custom.overrides.whatsapp_queue import (
+    CIRCUIT_BREAKER_THRESHOLD,
+    _breaker_key,
+    _get_failure_streak,
+    increment_circuit_breaker as _increment_failure_streak,
+    reset_circuit_breaker as _reset_failure_streak,
+)
 
-# Circuit breaker configuration
-CIRCUIT_BREAKER_THRESHOLD = 3   # consecutive failures before tripping
 MAX_BACKOFF_MINUTES = 60        # cap backoff at 1 hour
 MAX_BREAKER_DURATION_MINUTES = 60  # hard ceiling: auto-reset breaker after this
 
 
-def _validate_module_cache():
-	"""Validate that the Frappe module cache is not stale.
-
-	FIX #1: On 2026-07-11, a stale Redis cache caused "Module attendance
-	not found" which killed ALL WhatsApp notifications for the entire day.
-	This function detects and fixes that by:
-
-	1. Checking if 'attendance' module resolves to 'kreativ_attendance'
-	2. If not, clearing the app_modules cache and rebuilding the map
-	3. Logging the fix so we can detect recurrence
-
-	This runs every 5 minutes as part of the health check.
-	"""
-	try:
-		# Check if the attendance module resolves correctly
-		app = frappe.local.module_app.get("attendance")
-		if app == "kreativ_attendance":
-			return  # Cache is healthy
-
-		# Cache is stale or missing — rebuild it aggressively
-		frappe.cache().delete_value("app_modules")
-		frappe.client_cache.delete_value("installed_app_modules")
-		# Clear ALL controller caches (not just the current site)
-		# This prevents "Module import failed" errors from cached lookups
-		frappe.controllers.clear()
-		# Also clear the doctype_python_modules cache
-		frappe.modules.utils.doctype_python_modules.clear()
-		frappe.setup_module_map()
-
-		# Verify the fix
-		app_after = frappe.local.module_app.get("attendance")
-		if app_after == "kreativ_attendance":
-			frappe.log_error(
-				title="Module Cache Rebuilt",
-				message=(
-					"Stale module cache detected and fixed. "
-					f"attendance module now maps to: {app_after}. "
-					"Previous value: " + (app or "None") + ". "
-					"This was the root cause of notification failures on 2026-07-11."
-				),
-			)
-		else:
-			# Rebuild didn't fix it — directly set the mapping as fallback.
-			# frappe.setup_module_map() sometimes fails to rebuild
-			# frappe.local.module_app in certain Redis-cache-corruption scenarios.
-			frappe.local.module_app["attendance"] = "kreativ_attendance"
-			frappe.log_error(
-				title="Module Cache Force-Fixed",
-				message=(
-					"Rebuild failed — directly set module_app['attendance'] = kreativ_attendance. "
-					f"Previous mapping: {app or 'None'}. "
-					"This is a workaround for frappe.setup_module_map() not rebuilding correctly."
-				),
-			)
-	except Exception as e:
-		frappe.log_error(
-			title="Module Cache Validation Error",
-			message=str(e),
-		)
-
-
-# --- Circuit Breaker Helpers ---
-
-def _get_failure_streak() -> int:
-	"""Get consecutive health check failure count from cache."""
-	val = frappe.cache().get_value("openwa_failure_streak")
-	return int(val) if val else 0
-
-
-def _increment_failure_streak() -> int:
-	"""Increment failure streak and return new value."""
-	streak = _get_failure_streak() + 1
-	frappe.cache().set_value("openwa_failure_streak", streak, expires_in_sec=86400)
-	# Record when the breaker first tripped (for hard ceiling auto-reset)
-	if streak == CIRCUIT_BREAKER_THRESHOLD:
-		frappe.cache().set_value("openwa_breaker_tripped_at", str(get_datetime()), expires_in_sec=86400)
-	return streak
-
-
-def _reset_failure_streak():
-	"""Reset failure streak on successful health check."""
-	frappe.cache().delete_value("openwa_failure_streak")
-	frappe.cache().delete_value("openwa_breaker_tripped_at")
-	frappe.cache().delete_value("openwa_last_probe_time")
-
-
 def _is_breaker_tripped() -> bool:
-	"""Check if circuit breaker is active (too many consecutive failures)."""
+	"""Check if circuit breaker is active (>= threshold consecutive failures)."""
 	return _get_failure_streak() >= CIRCUIT_BREAKER_THRESHOLD
+
 
 
 def _calculate_backoff_minutes() -> int:
@@ -153,7 +84,7 @@ def _can_attempt_probe() -> bool:
 		return True
 
 	# --- Hard ceiling: auto-reset if breaker tripped too long ---
-	breaker_tripped_at = frappe.cache().get_value("openwa_breaker_tripped_at")
+	breaker_tripped_at = frappe.cache().get_value(_breaker_key("tripped"))
 	if breaker_tripped_at:
 		try:
 			elapsed_minutes = (get_datetime() - get_datetime(breaker_tripped_at)).total_seconds() / 60
@@ -167,15 +98,15 @@ def _can_attempt_probe() -> bool:
 						f"Force-resetting to allow recovery probe."
 					),
 				)
-				frappe.cache().set_value("openwa_last_probe_time", str(get_datetime()))
+				frappe.cache().set_value(_breaker_key("probe"), str(get_datetime()))
 				return True
 		except Exception:
 			pass
 
 	# --- Rate-limited probe: one attempt per jittered backoff period ---
-	last_probe = frappe.cache().get_value("openwa_last_probe_time")
+	last_probe = frappe.cache().get_value(_breaker_key("probe"))
 	if not last_probe:
-		frappe.cache().set_value("openwa_last_probe_time", str(get_datetime()))
+		frappe.cache().set_value(_breaker_key("probe"), str(get_datetime()))
 		return True
 
 	backoff = _calculate_backoff_minutes()
@@ -188,7 +119,7 @@ def _can_attempt_probe() -> bool:
 		elapsed = jittered_backoff + 1  # can't parse → allow probe
 
 	if elapsed >= jittered_backoff:
-		frappe.cache().set_value("openwa_last_probe_time", str(get_datetime()))
+		frappe.cache().set_value(_breaker_key("probe"), str(get_datetime()))
 		return True
 
 	return False
@@ -208,11 +139,11 @@ def _session_is_stale(settings, data: dict) -> bool:
 	age_minutes = (datetime.now(timezone.utc) - last_dt).total_seconds() / 60
 
 	if age_minutes > 60:
-		frappe.cache().set_value("openwa_session_stale", True, expires_in_sec=7200)
+		frappe.cache().set_value(_breaker_key("stale"), True, expires_in_sec=7200)
 		return True
 
 	# Session is healthy again — clear the stale flag
-	frappe.cache().delete_value("openwa_session_stale")
+	frappe.cache().delete_value(_breaker_key("stale"))
 	return False
 
 
@@ -268,7 +199,7 @@ def _restart_session(settings) -> dict:
 						title="OpenWA Session Recovered",
 						message=f"Auto-recovered via stop/start. lastActive={last_active}",
 					)
-					frappe.cache().delete_value("openwa_session_stale")
+					frappe.cache().delete_value(_breaker_key("stale"))
 					return {"status": "recovered", "lastActive": last_active}
 	except Exception:
 		pass
@@ -297,9 +228,6 @@ def check_openwa_session():
 	Scheduled job: runs every 5 minutes to verify OpenWA session is healthy.
 	If session is disconnected, restarts the OpenWA service via supervisor.
 
-	Also validates the module cache (Fix #1) to prevent "Module attendance
-	not found" errors that kill all notifications.
-
 	Circuit Breaker: Tracks consecutive failures. After 3 failures, trips
 	and enters exponential backoff (5min, 10min, 20min...) to avoid
 	hammering a down OpenWA instance. Reset on first success.
@@ -324,10 +252,6 @@ def check_openwa_session():
 	# If breaker is tripped but probe is due, fall through to actual check
 
 	try:
-		# Fix #1: Validate module cache before anything else.
-		# If the cache is stale, notifications will fail with "Module not found".
-		_validate_module_cache()
-
 		settings = frappe.get_cached_doc("OpenWA Settings")
 		if not settings.enabled:
 			# OpenWA disabled — reset streak and return
@@ -367,6 +291,62 @@ def check_openwa_session():
 				headers={"X-API-Key": api_key},
 				timeout=10
 			)
+
+			# --- Session not found on server (404) — auto-create a new one ---
+			if r.status_code == 404:
+				site_name = frappe.local.site or "default"
+				frappe.log_error(
+					title="OpenWA Session Lost — Auto-Creating",
+					message=(
+						f"Session {session_id} was not found on OpenWA server (404). "
+						f"Attempting to create a new session for site {site_name}. "
+						"QR scan will be needed to re-link WhatsApp."
+					),
+				)
+				try:
+					create_r = requests.post(
+						f"{base_url}/api/sessions",
+						headers={"Content-Type": "application/json", "X-API-Key": api_key},
+						json={"name": site_name},
+						timeout=10
+					)
+					if create_r.status_code == 201:
+						new_session = create_r.json()
+						new_id = new_session.get("id", "")
+						if new_id:
+							# Save new session ID to Frappe settings
+							settings.db_set("session_id", new_id, commit=True)
+							# Start the session to get QR_READY
+							requests.post(
+								f"{base_url}/api/sessions/{new_id}/start",
+								headers={"X-API-Key": api_key},
+								timeout=10
+							)
+							frappe.log_error(
+								title="OpenWA New Session Created — QR SCAN NEEDED",
+								message=(
+									f"New session created: {new_session.get('name', '')} (id: {new_id}). "
+									f"Status: {new_session.get('status', '')}. "
+									f"Updated OpenWA Settings with new session_id. "
+									f"YOU MUST SCAN THE QR CODE at {base_url}/ to link WhatsApp. "
+									f"Until scanned, the session will stay in disconnected state."
+								),
+							)
+							_increment_failure_streak()
+							return {"status": "qr_needed", "new_session_id": new_id, "checked": now()}
+					else:
+						frappe.log_error(
+							title="OpenWA Session Creation Failed",
+							message=f"POST /api/sessions returned {create_r.status_code}: {create_r.text[:300]}",
+						)
+				except Exception as create_e:
+					frappe.log_error(
+						title="OpenWA Session Creation Error",
+						message=f"Exception creating session: {create_e}",
+					)
+				_increment_failure_streak()
+				return {"status": "error", "reason": "Session lost and re-creation failed"}
+
 			if r.status_code != 200:
 				_increment_failure_streak()
 				frappe.log_error(
@@ -378,11 +358,40 @@ def check_openwa_session():
 			data = r.json()
 			status = data.get("status", "")
 
+			# --- Auto-start if session is created/disconnected (credentials may still exist) ---
+			if status in ["created", "disconnected"]:
+				try:
+					start_r = requests.post(
+						f"{base_url}/api/sessions/{session_id}/start",
+						headers={"X-API-Key": api_key},
+						timeout=15
+					)
+					if start_r.status_code in (200, 201):
+						start_data = start_r.json()
+						new_status = start_data.get("status", "")
+						_increment_failure_streak()
+						frappe.logger().info(
+							f"OpenWA session restarted: {status} -> {new_status}. "
+							f"If {new_status} != 'connected', QR scan may be needed."
+						)
+						return {"status": "started", "from": status, "to": new_status, "checked": now()}
+					else:
+						_increment_failure_streak()
+						frappe.log_error(
+							title="OpenWA Session Start Failed",
+							message=f"Start returned {start_r.status_code}: {start_r.text[:200]}",
+						)
+						return {"status": "error", "reason": f"Start returned {start_r.status_code}"}
+				except Exception as start_e:
+					_increment_failure_streak()
+					frappe.log_error(title="OpenWA Session Start Error", message=str(start_e))
+					return {"status": "error", "reason": f"Start error: {start_e}"}
+
 			if status not in ["ready", "connected"]:
 				_increment_failure_streak()
 				frappe.log_error(
 					title="OpenWA Session Unhealthy",
-					message=f"Session status: {status}. Restart manually if persistent.",
+					message=f"Session status: {status}. No auto-recovery available for this state.",
 				)
 				return {"status": "error", "reason": f"Session status: {status}"}
 
@@ -424,8 +433,7 @@ def check_openwa_session():
 				message=f"Session check failed: {e}. Restart manually if persistent.",
 			)
 			return {"status": "error", "reason": f"Session check failed: {e}"}
-
-		# 3. Retry any missed notifications now that session is confirmed healthy
+	# 3. Retry any missed notifications now that session is confirmed healthy
 		_retry_unsent()
 
 		# 4. Optional: Check for recent message activity (heartbeat)

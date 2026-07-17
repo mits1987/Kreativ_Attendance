@@ -1,0 +1,11 @@
+{
+    "module_name": "Kreativ Attendance",
+    "label": "Kreativ Attendance",
+    "description": "Attendance and HR management for Kreativ Gravures",
+    "icon": "octicon octicon-calendar",
+    "type": "module",
+    "category": "Modules",
+    "hidden": 0,
+    "restrict_to_domain": "",
+    "links": []
+}

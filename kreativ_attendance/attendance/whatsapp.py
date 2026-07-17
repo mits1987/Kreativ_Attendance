@@ -30,6 +30,7 @@ import frappe
 import requests
 from frappe.utils import format_datetime, get_datetime
 from datetime import datetime, timedelta
+from gravures_custom.overrides.whatsapp_queue import OpenWAClient, _breaker_key, _get_failure_streak
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -291,8 +292,7 @@ def notify_checkin(checkin_name: str, test_mode: bool = False):
 # ---------------------------------------------------------------------------
 
 def send_salary_slip(salary_slip: str):
-    """Background job: render the Salary Slip PDF and WhatsApp it to the
-    employee's own mobile number.
+    """Background job: render the Salary Slip PDF and WhatsApp it via OpenWAClient.
 
     This is triggered by the on_salary_slip_submit hook when
     settings.send_salary_slips is enabled.
@@ -323,13 +323,17 @@ def send_salary_slip(salary_slip: str):
         as_pdf=True,
     )
     period = frappe.utils.format_date(slip.start_date, "MMMM yyyy")
-    _post(settings, "send-document", {
-        "chatId": f"{digits}@c.us",
-        "base64": base64.b64encode(pdf).decode(),
-        "mimetype": "application/pdf",
-        "filename": f"Salary Slip {period} - {slip.employee_name}.pdf",
-        "caption": f"Salary Slip — {period}",
-    })
+    filename = f"Salary Slip {period} - {slip.employee_name}.pdf"
+    caption = f"Salary Slip — {period}"
+
+    client = OpenWAClient()
+    client.send_document(
+        chat_id=f"{digits}@c.us",
+        base64_data=base64.b64encode(pdf).decode(),
+        filename=filename,
+        mimetype="application/pdf",
+        caption=caption,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -337,64 +341,59 @@ def send_salary_slip(salary_slip: str):
 # ---------------------------------------------------------------------------
 
 def _post(settings, endpoint: str, payload: dict, raise_on_error: bool = False):
-    """Send a POST request to the OpenWA gateway API.
+    """Send a POST request via OpenWAClient (consolidated — Item 15).
 
-    This is the low-level function that communicates with OpenWA. It handles:
-        - URL construction from settings (base_url + session_id + endpoint)
-        - API key authentication via X-API-Key header
-        - Error logging (both HTTP errors and connection errors)
-        - Optional re-raise for critical failures
-
-    Args:
-        settings: OpenWA Settings document (singleton)
-        endpoint: API endpoint (e.g., "send-text", "send-document")
-        payload: JSON payload to send
-        raise_on_error: If True, throw a Frappe exception on failure
-
-    Returns:
-        True on success, False on failure
+    Thin wrapper around OpenWAClient that maps old _post() calls to the
+    consolidated client. Returns True on success, False on failure.
     """
-    url = "{0}/api/sessions/{1}/messages/{2}".format(
-        settings.base_url.rstrip("/"),
-        settings.session_id or "default",
-        endpoint,
-    )
-    api_key = settings.get_password("api_key", raise_exception=False) or ""
+    chat_id = payload.get("chatId", settings.chat_id)
+    text = payload.get("text", "")
+    base64_data = payload.get("base64", "")
+    filename = payload.get("filename", "document")
+    mimetype = payload.get("mimetype", "application/pdf")
+    caption = payload.get("caption", "")
+
+    client = OpenWAClient()
     try:
-        r = requests.post(
-            url,
-            json=payload,
-            headers={"X-API-Key": api_key},
-            timeout=10,
-        )
-        if not r.ok:
-            # Log the HTTP error with full context for debugging
-            frappe.log_error(
-                title=f"OpenWA HTTP {r.status_code}",
-                message=(
-                    f"URL: {url}\n"
-                    f"Status: {r.status_code}\n"
-                    f"Response: {r.text[:500]}\n"
-                    f"Payload chatId: {payload.get('chatId', 'N/A')}"
-                ),
-            )
-        r.raise_for_status()
-        return True
-    except Exception:
-        frappe.log_error(
-            title="OpenWA WhatsApp send failed",
-            message=frappe.get_traceback(),
-        )
+        if endpoint == "send-text":
+            result = client.send_text(chat_id, text)
+        elif endpoint == "send-document":
+            result = client.send_document(chat_id, base64_data, filename,
+                                          mimetype=mimetype, caption=caption)
+        else:
+            # Generic fallback — POST raw payload directly
+            from gravures_custom.overrides.whatsapp_queue import _get_openwa_config
+            base_url, api_key, session_id = _get_openwa_config()
+            if not base_url:
+                return False
+            url = "{0}/api/sessions/{1}/messages/{2}".format(
+                base_url.rstrip("/"), session_id or "default", endpoint)
+            r = requests.post(url, json=payload,
+                              headers={"X-API-Key": api_key}, timeout=10)
+            if r.ok:
+                return True
+            frappe.log_error(title=f"OpenWA HTTP {r.status_code}",
+                             message=r.text[:500])
+            return False
+
+        if result.get("success"):
+            return True
+        frappe.log_error(title="OpenWA send failed",
+                         message=result.get("error", "Unknown error"))
         if raise_on_error:
-            frappe.throw(
-                "Could not send via OpenWA — check Base URL / API Key / session. "
-                "Details are in the Error Log."
-            )
+            frappe.throw(result.get("error", "Could not send via OpenWA"))
+        return False
+    except Exception:
+        frappe.log_error(title="OpenWA WhatsApp send failed",
+                         message=frappe.get_traceback())
+        if raise_on_error:
+            frappe.throw("Could not send via OpenWA — check Base URL / API Key / session. "
+                         "Details are in the Error Log.")
         return False
 
 
 def send_text(settings: "frappe.model.document.Document", text: str, raise_on_error: bool = False) -> bool:
-    """Send a plain text message to the admin chat_id.
+    """Send a plain text message via OpenWAClient.
 
     Used by the "Send Test Message" button on the OpenWA Settings form.
     Always sends to the admin chat_id (settings.chat_id), NOT to employees.
@@ -404,8 +403,13 @@ def send_text(settings: "frappe.model.document.Document", text: str, raise_on_er
     if not settings.chat_id:
         frappe.msgprint("Set Recipient Chat ID in OpenWA Settings and Save first.")
         return False
-    return _post(settings, "send-text", {"chatId": settings.chat_id, "text": text},
-                 raise_on_error=raise_on_error)
+    client = OpenWAClient()
+    result = client.send_text(settings.chat_id, text)
+    if result.get("success"):
+        return True
+    if raise_on_error:
+        frappe.throw(result.get("error", "Could not send via OpenWA"))
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -438,11 +442,6 @@ def retry_missed_notifications():
         - Status 3 (permanently failed) is NEVER reset by this function
         - Status 2 → 0 reset is bounded to 7-day window
     """
-    # Fix #1: Validate module cache before loading settings.
-    # Without this, get_single("OpenWA Settings") fails with
-    # "Module attendance not found" if the Redis cache is stale.
-    from kreativ_attendance.attendance.openwa_health import _validate_module_cache
-    _validate_module_cache()
 
     settings = frappe.get_single("OpenWA Settings")
     if not (settings.enabled and settings.base_url):
@@ -452,7 +451,7 @@ def retry_missed_notifications():
     # The health checker sets this flag when lastActive > 60 min.
     # If the session is down, there's no point retrying — we'd just
     # create more error logs and waste resources.
-    if frappe.cache().get_value("openwa_session_stale"):
+    if frappe.cache().get_value(_breaker_key("stale")):
         frappe.log_error(
             title="OpenWA Retry Skipped",
             message="Session is stale (lastActive > 60 min). Check Error Log for 'OpenWA Session Stale'.",
@@ -466,7 +465,7 @@ def retry_missed_notifications():
     # reset → enqueue → fail → reset cycle.
     # NOTE: This does NOT touch status 3 (permanently failed).
     perm_fail_cutoff = get_datetime() - timedelta(days=7)
-    if (frappe.cache().get_value("openwa_failure_streak") or 0) < 3:
+    if _get_failure_streak() < 3:
         frappe.db.sql(
             """
             UPDATE `tabEmployee Checkin`
@@ -506,7 +505,7 @@ def retry_missed_notifications():
     enqueued = 0
     for c in unsent:
         try:
-            enqueue(
+            frappe.enqueue(
                 "kreativ_attendance.attendance.whatsapp.notify_checkin",
                 queue="short",
                 timeout=60,
