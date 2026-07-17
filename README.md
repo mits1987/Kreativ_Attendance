@@ -61,7 +61,7 @@ kreativ_attendance/
 │   ├── lock.py             # Shift lock mechanism
 │   ├── whatsapp.py         # WhatsApp notifications via OpenWA
 │   └── hooks.py            # Document event hooks
-├── doctypes/
+├── doctype/
 │   ├── employee_shift/           # Shift definitions
 │   ├── employee_shift_lock/      # Shift locks for payroll
 │   ├── employee_standard_hours/  # Standard hours per shift

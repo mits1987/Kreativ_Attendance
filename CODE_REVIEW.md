@@ -1,6 +1,6 @@
 # Kreativ Attendance — Code Review & Enhancement Plan
 
-> Generated: 2026-07-08
+> Generated: 2026-07-17 (Updated — originally 2026-07-08)
 > Scope: Full architecture, code quality, and feature analysis
 
 ---
@@ -150,8 +150,13 @@ Running `supervisorctl restart` from within the same supervisor-managed process 
 #### 8. No permission granularity
 All doctypes grant full CRUD to System Manager + HR Manager. No employee-level permissioning or read-only roles.
 
-#### 9. No ZKTeco/EasyTime sync code in the repo
-README mentions "ZKTeco Sync" but there's **no integration code**. The sync must happen externally. Either document this clearly or ship a sync module.
+#### 9. ZKTeco/EasyTime sync code exists — NOW PRESENT
+`zkteco_sync.py` (260+ lines) implements EasyTime Pro API integration with:
+- Configurable device list via ZKTeco Config doctype
+- Last-sync timestamp tracking per device
+- Auto-creation of Employee Checkin records from raw punch logs
+- Scheduled sync every 5 minutes via cron hook
+- JWT token caching with expiry-based TTL
 
 #### 10. Late/early tracking absent
 Only presence (IN/OUT paired) and OT are tracked. No "Late Coming", "Early Leaving", or "Half Day" logic — standard attendance system features.
@@ -191,10 +196,7 @@ Ignores the other 9 test files. Should use discovery or explicitly load all test
 
 ### Phase 2 — Core Enhancements (Week 1-2)
 
-- **ZKTeco Sync Module**: Add `zkteco_sync.py` that calls EasyTime Pro API with:
-  - Configurable device list (new DocType)
-  - Last-sync timestamp tracking
-  - Polling → auto-create Employee Checkin records
+- ~~**ZKTeco Sync Module**~~ — ✅ **DONE** `zkteco_sync.py` implements all planned features (configurable device list, last-sync tracking, auto-checkin creation, scheduled polling). See line 153.
 - **Holiday & Leave Integration**:
   - Skip check-ins on planned leaves / holidays in pairing logic
   - Link to ERPNext Holiday List and Leave Application
@@ -253,7 +255,7 @@ Ignores the other 9 test files. Should use discovery or explicitly load all test
 
 1. **Renaming inconsistency** — app renamed from `gravures_custom` to `kreativ_attendance` but JS files and directory structure weren't fully migrated
 2. **Missing runtime guards** — Employee Shift controller is empty; locked shifts can be edited through the UI
-3. **No ZKTeco sync code** — the primary data source has no integration in the repo
+3. **No ZKTeco sync code** — ~~the primary data source has no integration in the repo~~ ✅ **DONE** — `zkteco_sync.py` was added later with full EasyTime Pro integration
 
 Fix the 🔴 items in ~2 hours, then pick Phase 2 and 3 enhancements based on which pain points your HR team actually reports. The architecture is clean enough that enhancements slot in naturally — add a new module in `attendance/`, wire through `hooks.py`, done.
 
