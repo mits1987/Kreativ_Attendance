@@ -38,7 +38,7 @@ from gravures_custom.overrides.whatsapp_queue import OpenWAClient, _breaker_key,
 
 # After this many failed attempts, mark the checkin as permanently failed
 # (whatsapp_sent=3). This prevents infinite retry loops for invalid numbers.
-MAX_RETRY_ATTEMPTS = 2
+MAX_RETRY_ATTEMPTS = 5
 
 # Hardcoded admin chat_id for test messages. Test messages should ONLY go
 # to the developer/admin, never to employees. This is a safety measure to
