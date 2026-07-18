@@ -17,6 +17,18 @@ import requests
 
 JWT_CACHE_KEY = "zkteco_jwt_token"
 
+# punch_state -> ERPNext log_type. Direction is preserved even for Break /
+# Overtime states so pairing still works after HR confirms the intent.
+PUNCH_STATE_TO_LOG_TYPE = {
+    "0": "IN",
+    "1": "OUT",
+    "2": "OUT",   # Break Out — flagged, HR must confirm
+    "3": "IN",    # Break In  — flagged, HR must confirm
+    "4": "IN",    # Overtime In  — flagged
+    "5": "OUT",   # Overtime Out — flagged
+}
+NON_STANDARD_STATES = {"2", "3", "4", "5"}
+
 
 def _get_jwt_payload(token: str) -> dict:
     """Decode JWT payload (middle segment) without cryptographic verification.
@@ -199,9 +211,18 @@ def create_employee_checkin(transaction):
         else:
             punch_datetime = punch_time
 
-        log_type = "IN"
-        if str(punch_state) == "1":
-            log_type = "OUT"
+        # --- Punch state mapping (see module docstring) -------------------
+        state = str(punch_state) if punch_state is not None else ""
+        log_type = PUNCH_STATE_TO_LOG_TYPE.get(state)
+        if log_type is None:
+            # Unknown state: keep the record (never lose a punch), best-guess
+            # OUT only for "1", otherwise IN — and flag loudly.
+            log_type = "OUT" if state == "1" else "IN"
+            frappe.log_error(
+                f"Unknown punch_state '{state}' for {employee} at {punch_datetime}. "
+                f"Stored as {log_type}; verify on the device/EasyTime Pro.",
+                "ZKTeco Unknown Punch State",
+            )
 
         # Check if checkin already exists (by employee + time + device)
         existing_checkin = frappe.db.exists(
@@ -241,6 +262,25 @@ def create_employee_checkin(transaction):
             }
         )
         checkin.insert(ignore_permissions=True)
+
+        # Preserve the raw device state so quality.py can flag Break/OT
+        # punches and HR can see exactly what button was pressed.
+        if frappe.db.has_column("Employee Checkin", "punch_state_raw"):
+            checkin.punch_state_raw = state
+            checkin.save(ignore_permissions=True)
+
+        # Non-standard states (Break/Overtime) are payroll-relevant: log so
+        # they show up in Error Log even before the quality gate runs.
+        if state in NON_STANDARD_STATES:
+            labels = {"2": "Break Out", "3": "Break In",
+                      "4": "Overtime In", "5": "Overtime Out"}
+            frappe.log_error(
+                f"{labels.get(state, state)} punch from {employee} at "
+                f"{punch_datetime} (stored as {log_type}, checkin {checkin.name}). "
+                f"Employee likely pressed the wrong key — confirm before payroll. "
+                f"The quality gate will block month close until reviewed.",
+                "ZKTeco Break/OT Punch",
+            )
 
         return "new"
 

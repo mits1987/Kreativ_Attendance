@@ -136,15 +136,24 @@ def month_summary(year: int = None, month: int = None) -> dict:
 
 
 @frappe.whitelist()
-def sync_month_to_hrms(year: int = None, month: int = None, employee: str = None) -> dict:
+def sync_month_to_hrms(year: int = None, month: int = None, employee: str = None, force: int = 0) -> dict:
     """Create HRMS Attendance records + Overtime Additional Salary for a month.
 
     Run this once shifts for the month are reviewed (all rows green). Then use
     a standard HRMS Payroll Entry -> Create Salary Slips: payment days come from
     the Attendance records, overtime pay from the Additional Salary rows.
+
+    Args:
+        year, month: Period to sync
+        employee: Optional single employee (default all)
+        force: If 1, bypass the quality gate (audited override — logged to Error Log)
     """
     frappe.only_for(ALLOWED_ROLES)
     if not year or not month:
         frappe.throw(_("Both year and month are required"))
+    # NEW — server-side payroll gate (dialog text is not a guard)
+    from kreativ_attendance.attendance.quality import assert_month_clean
+    assert_month_clean(int(year), int(month), employee=employee or None,
+                       force=bool(int(force or 0)))
     from kreativ_attendance.attendance.hrms import sync_month_to_hrms as _sync
     return _sync(int(year), int(month), employee=employee or None)

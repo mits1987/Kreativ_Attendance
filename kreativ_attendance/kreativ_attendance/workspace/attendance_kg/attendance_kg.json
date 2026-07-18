@@ -1,0 +1,69 @@
+{
+ "app": "kreativ_attendance",
+ "charts": [],
+ "content": "[{\"id\":\"kg_hdr\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\">Attendance</span>\",\"col\":12}},{\"id\":\"kg_s1\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Attendance Dashboard\",\"col\":3}},{\"id\":\"kg_s2\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Employee Shift\",\"col\":3}},{\"id\":\"kg_s3\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Employee Checkin\",\"col\":3}},{\"id\":\"kg_s4\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Monthly Report\",\"col\":3}},{\"id\":\"kg_s5\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Payroll Entry\",\"col\":3}},{\"id\":\"kg_s6\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"WhatsApp Settings\",\"col\":3}}]",
+ "creation": "2026-07-19 00:43:36.077549",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "hide_custom": 0,
+ "icon": "calendar",
+ "idx": 0,
+ "indicator_color": "green",
+ "is_hidden": 0,
+ "label": "Attendance KG",
+ "link_type": "DocType",
+ "links": [],
+ "modified": "2026-07-19 01:32:35.253986",
+ "modified_by": "Administrator",
+ "module": "Kreativ Attendance",
+ "name": "Attendance KG",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 99.0,
+ "shortcuts": [
+  {
+   "doc_view": "",
+   "label": "Attendance Dashboard",
+   "link_to": "attendance-dashboard",
+   "type": "Page"
+  },
+  {
+   "doc_view": "",
+   "label": "Employee Shift",
+   "link_to": "Employee Shift",
+   "type": "DocType"
+  },
+  {
+   "doc_view": "",
+   "label": "Employee Checkin",
+   "link_to": "Employee Checkin",
+   "type": "DocType"
+  },
+  {
+   "doc_view": "",
+   "label": "Monthly Report",
+   "link_to": "Employee Shift Summary",
+   "report_ref_doctype": "Employee Shift",
+   "type": "Report"
+  },
+  {
+   "doc_view": "",
+   "label": "Payroll Entry",
+   "link_to": "Payroll Entry",
+   "type": "DocType"
+  },
+  {
+   "doc_view": "",
+   "label": "WhatsApp Settings",
+   "link_to": "OpenWA Settings",
+   "type": "DocType"
+  }
+ ],
+ "title": "Attendance KG",
+ "type": "Workspace"
+}

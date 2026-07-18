@@ -1,3 +1,3 @@
 __version__ = "0.0.1"
 
-from . import hooks
+import kreativ_attendance.hooks

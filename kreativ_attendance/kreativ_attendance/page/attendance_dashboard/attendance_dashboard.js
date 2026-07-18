@@ -92,6 +92,52 @@ frappe.pages['attendance-dashboard'].on_page_load = function(wrapper) {
 		frappe.set_route('query-report', 'Employee Shift Summary');
 	});
 
+	page.add_inner_button(__('Check Issues'), function() {
+		frappe.call({
+			method: 'kreativ_attendance.attendance.quality.month_issues',
+			args: { year: state.year, month: state.month },
+			callback: function(r) {
+				var m = r.message || {};
+				var n = (m.anomalies||[]).length + (m.long_sessions||[]).length
+				      + (m.break_punches||[]).length;
+				frappe.msgprint({
+					title: n ? __('Issues blocking payroll: {0}', [n]) : __('Month is clean'),
+					indicator: n ? 'red' : 'green',
+					message: n
+						? '<b>' + __('Anomalies') + ':</b> ' + (m.anomalies||[]).length
+						  + '<br><b>' + __('Long sessions (>{0}h)', [m.long_session_threshold_hours]) + ':</b> ' + (m.long_sessions||[]).length
+						  + '<br><b>' + __('Break punches') + ':</b> ' + (m.break_punches||[]).length
+						  + ((m.missing_standard_hours||[]).length
+							  ? '<br><b>' + __('No Standard Hours (8h default)') + ':</b> ' + m.missing_standard_hours.join(', ') : '')
+						: __('No anomalies, no suspicious long sessions, no break punches.')
+				});
+			}
+		});
+	});
+
+	page.add_inner_button(__('Run Month Close'), function() {
+		frappe.confirm(
+			__('Recalculate {0}, run the quality gate, sync to HRMS and create a draft Payroll Entry?', [period_label()]),
+			function() {
+				frappe.call({
+					method: 'kreativ_attendance.attendance.monthly.run_monthly_close',
+					args: { year: state.year, month: state.month },
+					freeze: true,
+					freeze_message: __('Closing the month...'),
+					callback: function(r) {
+						var m = r.message || {};
+						frappe.msgprint({
+							title: __('Month close: {0}', [m.status]),
+							indicator: m.status === 'ok' ? 'green' : 'red',
+							message: '<pre>' + JSON.stringify(m, null, 2) + '</pre>'
+						});
+						load();
+					}
+				});
+			}
+		);
+	});
+
 	var $body = $('<div class="attendance-dashboard" style="padding: 15px 0;"></div>').appendTo(page.main);
 
 	function card(label, value, color, onclick) {

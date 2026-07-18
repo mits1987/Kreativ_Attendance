@@ -122,13 +122,16 @@ def _create_overtime(shifts, period_end: date) -> dict:
     for s in shifts:
         ot_totals[s.employee] = ot_totals.get(s.employee, 0) + (s.overtime_seconds or 0)
 
-    rates = {
-        r["employee"]: r["overtime_rate"]
-        for r in frappe.get_all(
-            "Employee Standard Hours",
-            fields=["employee", "overtime_rate"],
-        )
-    }
+    try:
+        rates = {
+            r["employee"]: r["overtime_rate"]
+            for r in frappe.get_all(
+                "Employee Standard Hours",
+                fields=["employee", "overtime_rate"],
+            )
+        }
+    except frappe.DoesNotExistError:
+        rates = {}
 
     payroll_date = period_end - timedelta(days=1)  # last day of month
     _ensure_ot_component()

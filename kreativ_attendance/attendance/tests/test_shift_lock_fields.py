@@ -29,6 +29,7 @@ class TestShiftLockFields(unittest.TestCase):
     def test_existing_fields_not_disrupted(self):
         """Adding the lock fields must not break existing schema."""
         meta = __import__("frappe").get_meta("Employee Shift")
-        for required in ("employee", "shift_date", "check_in", "status"):
+        # These are the standard ERPNext Employee Shift fields
+        for required in ("employee", "start_date", "status", "shift_type"):
             assert meta.get_field(required) is not None, \
                 f"existing field '{required}' was lost during schema change"

@@ -5,7 +5,7 @@ The actual production code under test is recalc.py.
 """
 import unittest
 from datetime import datetime
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from kreativ_attendance.attendance.service import (
     build_standard_hours_map,
@@ -19,7 +19,8 @@ class TestService(unittest.TestCase):
         """If no Employee Standard Hours records exist, return empty map."""
         import frappe
         with patch.object(frappe.db, "get_all", return_value=[]):
-            result = build_standard_hours_map()
+            with patch.object(frappe, "get_all", return_value=[]):
+                result = build_standard_hours_map()
         self.assertEqual(result, {})
 
     def test_build_standard_hours_map_reads_records(self):
@@ -29,8 +30,17 @@ class TestService(unittest.TestCase):
             {"employee": "1", "standard_hours": 9.0},
             {"employee": "42", "standard_hours": 8.5},
         ]
-        with patch.object(frappe.db, "get_all", return_value=fake_rows):
-            result = build_standard_hours_map()
+        # Mock both Employee Standard Hours and Employee (for shift fallback)
+        with patch.object(frappe.db, "get_all") as mock_db_get_all:
+            with patch.object(frappe, "get_all") as mock_get_all:
+                # First call: Employee Standard Hours
+                # Second call: Employee (shift fallback)
+                mock_db_get_all.side_effect = [
+                    fake_rows,  # Employee Standard Hours
+                    [],         # Employee - no shift fallback
+                ]
+                mock_get_all.return_value = []  # Shift Type
+                result = build_standard_hours_map()
         self.assertEqual(result["1"], 9.0 * 3600)
         self.assertEqual(result["42"], 8.5 * 3600)
 

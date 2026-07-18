@@ -34,7 +34,11 @@ scheduler_events = {
 		],
 		"*/10 * * * *": [
 			"kreativ_attendance.attendance.whatsapp.retry_missed_notifications"
-		]
+		],
+		# 02:30 on the 1st of every month — close the previous month
+		"30 2 1 * *": [
+			"kreativ_attendance.attendance.monthly.monthly_close"
+		],
 	},
 	"daily": [
 		"kreativ_attendance.install.validate_scheduled_jobs"
@@ -64,6 +68,35 @@ custom_fields = {
 			"default": 0,
 			"description": "Number of times WhatsApp send has been attempted",
 		},
+		{
+			"fieldname": "punch_state_raw",
+			"label": "Punch State Raw",
+			"fieldtype": "Data",
+			"insert_after": "whatsapp_retry_count",
+			"read_only": 1,
+			"no_copy": 1,
+			"description": "Raw ZKTeco punch_state code (0=IN, 1=OUT, 2=Break Out, 3=Break In, 4=OT In, 5=OT Out)",
+		},
+	],
+	"Employee Shift": [
+		{
+			"fieldname": "locked",
+			"label": "Locked",
+			"fieldtype": "Check",
+			"insert_after": "status",
+			"read_only": 1,
+			"default": 0,
+			"description": "Set when the employee-month is payroll-locked (no further edits/pairing)",
+		},
+		{
+			"fieldname": "lock_period",
+			"label": "Lock Period",
+			"fieldtype": "Data",
+			"insert_after": "locked",
+			"read_only": 1,
+			"no_copy": 1,
+			"description": "Period identifier (YYYY-MM) this shift row belongs to for the lock",
+		},
 	]
 }
 
@@ -79,7 +112,8 @@ after_migrate = "kreativ_attendance.install.after_migrate"
 
 # Patches
 patches = [
-	"kreativ_attendance.patches.v16_0.add_openwa_settings_fields"
+	"kreativ_attendance.patches.v16_0.add_openwa_settings_fields",
+	"kreativ_attendance.patches.v16_0.add_punch_state_raw_field"
 ]
 
 # Update website context

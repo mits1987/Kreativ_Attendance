@@ -20,7 +20,7 @@ def after_migrate():
 def sync_scheduled_jobs():
 	"""Sync scheduler_events from hooks.py to tabScheduled Job Type.
 
-	This mirrors what `frappe.desk.doctype.scheduled_job_type.scheduled_job_type.sync_jobs`
+	This mirrors what `frappe.core.doctype.scheduled_job_type.scheduled_job_type.sync_jobs`
 	does internally, but runs *after* app patches so custom cron jobs are registered
 	before the scheduler picks them up.
 	"""
@@ -28,7 +28,7 @@ def sync_scheduled_jobs():
 	if not hooks:
 		return
 
-	from frappe.desk.doctype.scheduled_job_type.scheduled_job_type import sync_jobs
+	from frappe.core.doctype.scheduled_job_type.scheduled_job_type import sync_jobs
 	sync_jobs(hooks)
 	frappe.db.commit()
 

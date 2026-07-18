@@ -26,16 +26,75 @@ def build_standard_hours_map() -> dict:
 
     Key is the Employee document name (HR-EMP-XXXXX), not the ZKTeco code,
     because the translation to codes happens at lookup time in recalculate_period.
+
+    Falls back to Employee.default_shift -> Shift Type (start_time/end_time) if
+    Employee Standard Hours record doesn't exist.
     """
-    rows = frappe.db.get_all(
-        "Employee Standard Hours",
-        fields=["employee", "standard_hours"],
+    # First, get explicit Employee Standard Hours records
+    try:
+        esh_rows = frappe.db.get_all(
+            "Employee Standard Hours",
+            fields=["employee", "standard_hours"],
+        )
+    except frappe.DoesNotExistError:
+        esh_rows = []
+    standard_map = {r["employee"]: seconds_from_hours(r["standard_hours"]) for r in esh_rows}
+
+    # Build fallback map from Employee.default_shift -> Shift Type duration
+    shift_map = _build_shift_hours_fallback_map()
+
+    # For employees without explicit standard hours, use shift fallback
+    all_employees = set(standard_map.keys()) | set(shift_map.keys())
+    for emp in all_employees:
+        if emp not in standard_map and emp in shift_map:
+            standard_map[emp] = shift_map[emp]
+
+    return standard_map
+
+
+def _build_shift_hours_fallback_map() -> dict:
+    """Return {employee: standard_seconds} from Employee.default_shift -> Shift Type."""
+    # Get employees with default_shift set
+    emp_shifts = frappe.db.get_all(
+        "Employee",
+        filters={"default_shift": ["!=", ""]},
+        fields=["name", "default_shift"],
     )
-    return {r["employee"]: seconds_from_hours(r["standard_hours"]) for r in rows}
+    if not emp_shifts:
+        return {}
+
+    shift_names = list({e["default_shift"] for e in emp_shifts})
+    # Get shift type start/end times
+    shift_types = frappe.get_all(
+        "Shift Type",
+        filters={"name": ["in", shift_names]},
+        fields=["name", "start_time", "end_time"],
+    )
+    shift_hours = {}
+    for st in shift_types:
+        start = st.get("start_time") or 0
+        end = st.get("end_time") or 0
+        # Time fields return timedelta; convert to seconds
+        if hasattr(start, "total_seconds"):
+            start = int(start.total_seconds())
+        if hasattr(end, "total_seconds"):
+            end = int(end.total_seconds())
+        if end > start:
+            shift_hours[st["name"]] = int(end - start)
+        else:
+            shift_hours[st["name"]] = DEFAULT_STANDARD_SECONDS
+
+    # Map employee -> shift standard seconds
+    emp_map = {}
+    for e in emp_shifts:
+        shift_name = e["default_shift"]
+        if shift_name in shift_hours:
+            emp_map[e["name"]] = shift_hours[shift_name]
+    return emp_map
 
 
 def default_standard_seconds(standard_map: dict, employee: str) -> int:
-    """Return per-employee standard, or 8h default if not set."""
+    """Return per-employee standard, or 8h default if not set anywhere."""
     return standard_map.get(employee) or DEFAULT_STANDARD_SECONDS
 
 
@@ -162,7 +221,7 @@ def create_shift_record(employee, paired_shift) -> str:
 # ---------------------------------------------------------------------------
 
 _SHIFT_FIELDS = [
-    "employee", "shift_date", "check_in", "check_out",
+    "name", "employee", "shift_date", "check_in", "check_out",
     "worked_hours", "overtime_hours", "worked_seconds", "overtime_seconds",
     "standard_hours", "check_in_record", "check_out_record",
     "status", "anomaly_reason",
@@ -177,11 +236,13 @@ def _bulk_insert_shifts(emp: str, standard: float,
     Paired shifts and anomaly rows are inserted together.  Returns
     (paired_count, anomaly_count).
     """
+    import uuid
     values = []
 
     for p in paired_shifts:
         p["standard_hours"] = standard / 3600.0
         values.append((
+            str(uuid.uuid4()).replace("-", "")[:24],
             emp,
             p["shift_date"],
             p["check_in_time"],
@@ -202,6 +263,7 @@ def _bulk_insert_shifts(emp: str, standard: float,
         if not (a_time.year == year and a_time.month == month):
             continue
         values.append((
+            str(uuid.uuid4()).replace("-", "")[:24],
             emp,
             a_time.date() if hasattr(a_time, "date") else a_time,
             a_time if a.get("log_type") == "IN" else None,
@@ -230,16 +292,19 @@ def has_active_lock(employee: str, year: int, month: int) -> bool:
     An active lock has unlocked_at == None. Used by recalculate_period / recalculate_for_checkin
     to refuse re-pairing if the period is payroll-finalized.
     """
-    name = frappe.db.get_value(
-        "Employee Shift Lock",
-        [
-            ["employee", "=", employee],
-            ["period_year", "=", int(year)],
-            ["period_month", "=", int(month)],
-            ["unlocked_at", "is", "not set"],
-        ],
-        "name",
-    )
+    try:
+        name = frappe.db.get_value(
+            "Employee Shift Lock",
+            [
+                ["employee", "=", employee],
+                ["period_year", "=", int(year)],
+                ["period_month", "=", int(month)],
+                ["unlocked_at", "is", "not set"],
+            ],
+            "name",
+        )
+    except frappe.DoesNotExistError:
+        return False
     return bool(name)
 
 
@@ -265,15 +330,18 @@ def recalculate_period(year: int, month: int, employee: str = None) -> dict:
     # PRE-FLIGHT: never delete/rewrite a payroll-locked employee-month.
     # Single-employee recalc: throw (the caller explicitly asked for this employee).
     # Bulk recalc: skip locked employees so one payroll lock doesn't block everyone.
-    locked_emps = set(frappe.db.get_all(
-        "Employee Shift Lock",
-        filters=[
-            ["period_year", "=", int(year)],
-            ["period_month", "=", int(month)],
-            ["unlocked_at", "is", "not set"],
-        ],
-        pluck="employee",
-    ))
+    try:
+        locked_emps = set(frappe.db.get_all(
+            "Employee Shift Lock",
+            filters=[
+                ["period_year", "=", int(year)],
+                ["period_month", "=", int(month)],
+                ["unlocked_at", "is", "not set"],
+            ],
+            pluck="employee",
+        ))
+    except frappe.DoesNotExistError:
+        locked_emps = set()
     if employee and employee in locked_emps:
         frappe.throw(
             f"Cannot recalculate: an Employee Shift Lock for "
