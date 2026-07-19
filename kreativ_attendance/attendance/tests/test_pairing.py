@@ -50,7 +50,7 @@ class TestPairing(unittest.TestCase):
         paired, _ = pair_checkins(ck, 8 * 3600, 2026, 5)
         assert len(paired) == 1
         assert paired[0]["total_seconds"] == 8 * 3600
-        assert paired[0]["shift_date"] == datetime(2026, 5, 1).date()
+        assert paired[0]["start_date"] == datetime(2026, 5, 1).date()
 
     def test_only_check_in_unpaired(self):
         ck = [ci(9)]

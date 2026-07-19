@@ -1,4 +1,4 @@
-"""Bridge from Employee Shift into standard HRMS doctypes.
+"""Bridge from KG Employee Attendance Shift into standard HRMS doctypes.
 
 sync_month_to_hrms(year, month) does two things, both idempotent:
 
@@ -9,7 +9,7 @@ sync_month_to_hrms(year, month) does two things, both idempotent:
    same employee+date are skipped, so re-running is safe.
 
 2. Additional Salary — one submitted "Overtime" row per employee for the
-   month (amount = total OT hours x Employee Standard Hours.overtime_rate).
+   month (amount = total OT hours x KG Employee Standard Hours.overtime_rate).
    Employees with no overtime or no rate are skipped and reported.
 
 After syncing, use a standard Payroll Entry -> Create Salary Slips.
@@ -39,7 +39,7 @@ def sync_month_to_hrms(year: int, month: int, employee: str = None) -> dict:
         filters.append(["employee", "=", employee])
 
     shifts = frappe.get_all(
-        "Employee Shift",
+        "KG Employee Attendance Shift",
         filters=filters,
         fields=["employee", "shift_date", "check_in", "check_out",
                 "worked_seconds", "overtime_seconds"],
@@ -56,7 +56,6 @@ def sync_month_to_hrms(year: int, month: int, employee: str = None) -> dict:
         "period": f"{year}-{month:02d}",
         "attendance_created": att["created"],
         "attendance_skipped_existing": att["skipped"],
-        "attendance_outdated": att["outdated"],
         "attendance_errors": att["errors"],
         "overtime_created": ot["created"],
         "overtime_skipped_existing": ot["skipped"],
@@ -79,25 +78,12 @@ def _create_attendance(shifts) -> dict:
         if s.check_out and (not d["out"] or s.check_out > d["out"]):
             d["out"] = s.check_out
 
-    created, skipped, errors, outdated = 0, 0, [], []
+    created, skipped, errors = 0, 0, []
     for (emp, day), d in sorted(by_day.items()):
-        existing = frappe.db.get_value(
-            "Attendance",
-            {"employee": emp, "attendance_date": day, "docstatus": ["<", 2]},
-            ["name", "working_hours"],
-            as_dict=True,
-        )
-        if existing:
+        if frappe.db.exists("Attendance", {
+            "employee": emp, "attendance_date": day, "docstatus": ["<", 2],
+        }):
             skipped += 1
-            # Shifts corrected after a previous sync? Tell HR instead of
-            # silently leaving stale hours in payroll.
-            new_hours = round(d["worked"] / 3600.0, 2)
-            if abs((existing.working_hours or 0) - new_hours) > 0.02:
-                outdated.append(
-                    f"{emp} {day}: Attendance {existing.name} has "
-                    f"{existing.working_hours}h but shifts now total {new_hours}h "
-                    f"— cancel it and re-run the sync"
-                )
             continue
         try:
             doc = frappe.get_doc({
@@ -114,7 +100,7 @@ def _create_attendance(shifts) -> dict:
             created += 1
         except Exception as e:
             errors.append(f"{emp} {day}: {e}")
-    return {"created": created, "skipped": skipped, "errors": errors, "outdated": outdated}
+    return {"created": created, "skipped": skipped, "errors": errors}
 
 
 def _create_overtime(shifts, period_end: date) -> dict:
@@ -122,16 +108,13 @@ def _create_overtime(shifts, period_end: date) -> dict:
     for s in shifts:
         ot_totals[s.employee] = ot_totals.get(s.employee, 0) + (s.overtime_seconds or 0)
 
-    try:
-        rates = {
-            r["employee"]: r["overtime_rate"]
-            for r in frappe.get_all(
-                "Employee Standard Hours",
-                fields=["employee", "overtime_rate"],
-            )
-        }
-    except frappe.DoesNotExistError:
-        rates = {}
+    rates = {
+        r["employee"]: r["overtime_rate"]
+        for r in frappe.get_all(
+            "KG Employee Standard Hours",
+            fields=["employee", "overtime_rate"],
+        )
+    }
 
     payroll_date = period_end - timedelta(days=1)  # last day of month
     _ensure_ot_component()

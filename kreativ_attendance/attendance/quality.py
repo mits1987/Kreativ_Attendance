@@ -5,7 +5,7 @@ This module is the single answer to the question: "is this month safe to pay?"
 It scans a (year, month) period for every condition that historically caused
 over/under-payment in the old Excel + Python workflow:
 
-    1. anomalies      — unpaired punches / missing checkouts (Employee Shift
+    1. anomalies      — unpaired punches / missing checkouts (KG Employee Attendance Shift
                         rows with status Anomaly or Missing Check-Out).
                         previous_month_carryover is informational and does
                         NOT block.
@@ -18,7 +18,7 @@ over/under-payment in the old Excel + Python workflow:
                         punch_state_raw custom field by zkteco_sync). The old
                         script hard-stopped on these; we surface them here.
     4. missing_standard_hours — employees with shifts this month but no
-                        Employee Standard Hours row (silently falling back
+                        KG Employee Standard Hours row (silently falling back
                         to the 8h default changes their overtime).
 
 `assert_month_clean()` throws with a readable, per-employee list — call it
@@ -43,6 +43,9 @@ BLOCKING_STATUSES = ("Anomaly", "Missing Check-Out")
 INFORMATIONAL_REASONS = ("previous_month_carryover",)
 
 DEFAULT_LONG_SESSION_HOURS = 13.0
+
+DOCTYPE = "KG Employee Attendance Shift"
+STANDARD_HOURS_DOCTYPE = "KG Employee Standard Hours"
 
 
 def _period(year: int, month: int):
@@ -81,7 +84,7 @@ def get_month_issues(year: int, month: int, employee: str = None) -> dict:
 
     # --- 1. Anomalies (unpaired / missing checkout), excluding informational ---
     anomalies = frappe.get_all(
-        "Employee Shift",
+        "KG Employee Attendance Shift",
         filters=base_filters + [["status", "in", list(BLOCKING_STATUSES)]],
         fields=["name", "employee", "employee_name", "shift_date",
                 "status", "anomaly_reason"],
@@ -95,7 +98,7 @@ def get_month_issues(year: int, month: int, employee: str = None) -> dict:
     # --- 2. Long sessions (the old script's yellow >13h rows) ---
     threshold = long_session_seconds()
     long_sessions = frappe.get_all(
-        "Employee Shift",
+        "KG Employee Attendance Shift",
         filters=base_filters + [
             ["status", "in", ["Paired", "Manual"]],
             ["worked_seconds", ">", threshold],
@@ -125,14 +128,14 @@ def get_month_issues(year: int, month: int, employee: str = None) -> dict:
     # --- 4. Employees silently on the 8h default ---
     emps_with_shifts = set(
         r[0] for r in frappe.db.sql(
-            """SELECT DISTINCT employee FROM `tabEmployee Shift`
+            """SELECT DISTINCT employee FROM `tabKG Employee Attendance Shift`
                WHERE shift_date >= %s AND shift_date < %s
                {emp}""".format(emp="AND employee = %s" if employee else ""),
             (start, end, employee) if employee else (start, end),
         )
     )
     try:
-        have_hours = set(frappe.get_all("Employee Standard Hours", pluck="employee"))
+        have_hours = set(frappe.get_all(STANDARD_HOURS_DOCTYPE, pluck="employee"))
     except frappe.DoesNotExistError:
         have_hours = set()
 

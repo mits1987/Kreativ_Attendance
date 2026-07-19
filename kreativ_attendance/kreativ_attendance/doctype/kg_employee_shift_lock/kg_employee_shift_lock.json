@@ -1,0 +1,183 @@
+{
+  "actions": [],
+  "allow_bulk_edit": 1,
+  "allow_copy": 1,
+  "allow_events_in_timeline": 1,
+  "allow_import": 1,
+  "allow_rename": 1,
+  "autoname": "KGEASL-.YY.MM.-.#####",
+  "creation": "2026-07-19 11:00:00.000000",
+  "doctype": "DocType",
+  "editable_grid": 1,
+  "engine": "InnoDB",
+  "field_order": [
+    "naming_series",
+    "employee",
+    "employee_name",
+    "period_year",
+    "period_month",
+    "salary_slip",
+    "reason",
+    "column_break_status",
+    "locked_at",
+    "locked_by",
+    "unlock_section",
+    "is_unlocked",
+    "unlocked_at",
+    "unlocked_by",
+    "unlock_reason",
+    "snapshot_section",
+    "snapshot_total_worked_seconds",
+    "snapshot_total_overtime_seconds",
+    "snapshot_shift_count"
+  ],
+  "fields": [
+    {
+      "fieldname": "naming_series",
+      "fieldtype": "Select",
+      "options": "KGEASL-.YY.MM.-",
+      "label": "Naming Series",
+      "set_only_once": 1
+    },
+    {
+      "fieldname": "employee",
+      "fieldtype": "Link",
+      "options": "Employee",
+      "reqd": 1,
+      "label": "Employee"
+    },
+    {
+      "fieldname": "employee_name",
+      "fieldtype": "Read Only",
+      "fetch_from": "employee.employee_name",
+      "label": "Employee Name"
+    },
+    {
+      "fieldname": "period_year",
+      "fieldtype": "Int",
+      "reqd": 1,
+      "label": "Period Year",
+      "description": "Year of the locked period"
+    },
+    {
+      "fieldname": "period_month",
+      "fieldtype": "Int",
+      "reqd": 1,
+      "label": "Period Month (1-12)",
+      "description": "Month of the locked period (1=January)"
+    },
+    {
+      "fieldname": "salary_slip",
+      "fieldtype": "Data",
+      "label": "Salary Slip (optional)",
+      "description": "The salary slip that finalized this period"
+    },
+    {
+      "fieldname": "reason",
+      "fieldtype": "Small Text",
+      "default": "Salary Slip submitted",
+      "label": "Reason"
+    },
+    {
+      "fieldname": "column_break_status",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "locked_at",
+      "fieldtype": "Datetime",
+      "label": "Locked At",
+      "read_only": 1
+    },
+    {
+      "fieldname": "locked_by",
+      "fieldtype": "Link",
+      "options": "User",
+      "label": "Locked By",
+      "read_only": 1
+    },
+    {
+      "fieldname": "unlock_section",
+      "fieldtype": "Section Break",
+      "label": "Unlock"
+    },
+    {
+      "fieldname": "is_unlocked",
+      "fieldtype": "Check",
+      "default": "0",
+      "label": "Unlocked"
+    },
+    {
+      "fieldname": "unlocked_at",
+      "fieldtype": "Datetime",
+      "label": "Unlocked At"
+    },
+    {
+      "fieldname": "unlocked_by",
+      "fieldtype": "Link",
+      "options": "User",
+      "label": "Unlocked By"
+    },
+    {
+      "fieldname": "unlock_reason",
+      "fieldtype": "Small Text",
+      "label": "Unlock Reason",
+      "mandatory_depends_on": "eval:doc.is_unlocked==1"
+    },
+    {
+      "fieldname": "snapshot_section",
+      "fieldtype": "Section Break",
+      "label": "Snapshot at Lock Time"
+    },
+    {
+      "fieldname": "snapshot_total_worked_seconds",
+      "fieldtype": "Int",
+      "read_only": 1,
+      "label": "Total Worked Seconds (snapshot)"
+    },
+    {
+      "fieldname": "snapshot_total_overtime_seconds",
+      "fieldtype": "Int",
+      "read_only": 1,
+      "label": "Total Overtime Seconds (snapshot)"
+    },
+    {
+      "fieldname": "snapshot_shift_count",
+      "fieldtype": "Int",
+      "read_only": 1,
+      "label": "Shift Count (snapshot)"
+    }
+  ],
+  "row_format": "Dynamic",
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "track_changes": 1,
+  "track_seen": 1,
+  "track_views": 1,
+  "module": "kreativ_attendance",
+  "name": "KG Employee Shift Lock",
+  "owner": "Administrator",
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1
+    },
+    {
+      "role": "HR Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1
+    },
+    {
+      "role": "HR User",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1
+    }
+  ],
+  "show_name_in_global_search": 1
+}

@@ -1,0 +1,304 @@
+{
+  "actions": [],
+  "allow_bulk_edit": 1,
+  "allow_copy": 1,
+  "allow_events_in_timeline": 1,
+  "allow_import": 1,
+  "allow_rename": 1,
+  "autoname": "naming_series:",
+  "creation": "2026-07-19 11:00:00.000000",
+  "doctype": "DocType",
+  "editable_grid": 1,
+  "engine": "InnoDB",
+  "field_order": [
+    "naming_series",
+    "employee",
+    "employee_name",
+    "department",
+    "column_break_main",
+    "shift_date",
+    "check_in",
+    "check_in_record",
+    "check_out",
+    "check_out_record",
+    "worked_hours",
+    "overtime_hours",
+    "worked_seconds",
+    "overtime_seconds",
+    "standard_hours",
+    "section_break_checkins",
+    "column_break_status",
+    "status",
+    "anomaly_reason",
+    "manual_correction",
+    "section_break_lock",
+    "locked",
+    "lock_period"
+  ],
+  "fields": [
+    {
+      "fieldname": "naming_series",
+      "fieldtype": "Select",
+      "options": "KG-EAS-.YYYY.-",
+      "label": "Naming Series",
+      "set_only_once": 1,
+      "in_list_view": 0,
+      "in_standard_filter": 0
+    },
+    {
+      "fieldname": "employee",
+      "fieldtype": "Link",
+      "options": "Employee",
+      "reqd": 1,
+      "label": "Employee",
+      "in_list_view": 1,
+      "in_standard_filter": 1,
+      "in_global_search": 1
+    },
+    {
+      "fetch_from": "employee.employee_name",
+      "fieldname": "employee_name",
+      "fieldtype": "Read Only",
+      "label": "Employee Name",
+      "in_list_view": 1,
+      "in_standard_filter": 0,
+      "in_global_search": 1
+    },
+    {
+      "fetch_from": "employee.department",
+      "fieldname": "department",
+      "fieldtype": "Read Only",
+      "label": "Department",
+      "in_list_view": 0,
+      "in_standard_filter": 0
+    },
+    {
+      "fieldname": "column_break_main",
+      "fieldtype": "Column Break",
+      "in_list_view": 0,
+      "in_standard_filter": 0
+    },
+    {
+      "fieldname": "shift_date",
+      "fieldtype": "Date",
+      "reqd": 1,
+      "label": "Shift Date (IN date)",
+      "description": "Date the shift STARTED (used for month buckets)",
+      "in_list_view": 1,
+      "in_standard_filter": 1
+    },
+    {
+      "fieldname": "check_in",
+      "fieldtype": "Datetime",
+      "label": "Check-In Time",
+      "in_list_view": 1,
+      "in_standard_filter": 0
+    },
+    {
+      "fieldname": "check_in_record",
+      "fieldtype": "Link",
+      "options": "Employee Checkin",
+      "label": "Check-In Record",
+      "in_list_view": 1,
+      "columns": 1,
+      "in_standard_filter": 0
+    },
+    {
+      "fieldname": "check_out",
+      "fieldtype": "Datetime",
+      "label": "Check-Out Time",
+      "in_list_view": 1,
+      "in_standard_filter": 0
+    },
+    {
+      "fieldname": "check_out_record",
+      "fieldtype": "Link",
+      "options": "Employee Checkin",
+      "label": "Check-Out Record",
+      "in_list_view": 1,
+      "columns": 1,
+      "in_standard_filter": 0
+    },
+    {
+      "fieldname": "worked_hours",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "label": "Worked (HH:MM)",
+      "in_list_view": 1,
+      "in_standard_filter": 0
+    },
+    {
+      "fieldname": "overtime_hours",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "label": "Overtime (HH:MM)",
+      "in_list_view": 1,
+      "in_standard_filter": 0
+    },
+    {
+      "fieldname": "worked_seconds",
+      "fieldtype": "Int",
+      "read_only": 1,
+      "hidden": 1,
+      "label": "Worked Seconds",
+      "in_list_view": 0,
+      "in_standard_filter": 0
+    },
+    {
+      "fieldname": "overtime_seconds",
+      "fieldtype": "Int",
+      "read_only": 1,
+      "hidden": 1,
+      "label": "Overtime Seconds",
+      "in_list_view": 0,
+      "in_standard_filter": 0
+    },
+    {
+      "default": "8",
+      "fieldname": "standard_hours",
+      "fieldtype": "Float",
+      "label": "Standard Shift Hours",
+      "in_list_view": 0,
+      "in_standard_filter": 0
+    },
+    {
+      "fieldname": "section_break_checkins",
+      "fieldtype": "Section Break",
+      "label": "Source Checkins",
+      "in_list_view": 0,
+      "in_standard_filter": 0
+    },
+    {
+      "fieldname": "column_break_status",
+      "fieldtype": "Column Break",
+      "in_list_view": 0,
+      "in_standard_filter": 0
+    },
+    {
+      "default": "Paired",
+      "fieldname": "status",
+      "fieldtype": "Select",
+      "options": "Paired\nMissing Check-Out\nAnomaly\nManual",
+      "reqd": 1,
+      "bold": 1,
+      "label": "Status",
+      "in_list_view": 1,
+      "in_standard_filter": 1
+    },
+    {
+      "fieldname": "anomaly_reason",
+      "fieldtype": "Select",
+      "options": "\nmissing_checkout\nprevious_month_carryover\nbreak_punch\nmanual_correction",
+      "read_only": 1,
+      "label": "Anomaly Reason",
+      "in_list_view": 0,
+      "in_standard_filter": 0
+    },
+    {
+      "default": "0",
+      "fieldname": "manual_correction",
+      "fieldtype": "Check",
+      "label": "Manual Correction Applied",
+      "description": "Checked when user manually edits shift fields",
+      "in_list_view": 0,
+      "in_standard_filter": 0
+    },
+    {
+      "fieldname": "section_break_lock",
+      "fieldtype": "Section Break",
+      "label": "Salary Lock",
+      "in_list_view": 0,
+      "in_standard_filter": 0
+    },
+    {
+      "default": "0",
+      "fieldname": "locked",
+      "fieldtype": "Check",
+      "label": "Locked (by Salary Slip)",
+      "read_only": 1,
+      "in_list_view": 1,
+      "in_standard_filter": 1
+    },
+    {
+      "fieldname": "lock_period",
+      "fieldtype": "Link",
+      "options": "KG Employee Shift Lock",
+      "label": "Lock Reference",
+      "read_only": 1,
+      "in_list_view": 0,
+      "in_standard_filter": 0
+    }
+  ],
+  "color": "#29CD41",
+  "indicator_color": "green",
+  "grid_page_length": 50,
+  "index_web_pages_for_search": 1,
+  "links": [],
+  "modified": "2026-07-19 11:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "kreativ_attendance",
+  "name": "KG Employee Attendance Shift",
+  "naming_rule": "By \"Naming Series\" field",
+  "owner": "Administrator",
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "email": 1,
+      "export": 1,
+      "print": 1,
+      "report": 1,
+      "share": 1
+    },
+    {
+      "role": "HR Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "email": 1,
+      "export": 1,
+      "print": 1,
+      "report": 1,
+      "share": 1
+    },
+    {
+      "role": "HR User",
+      "read": 1,
+      "write": 1,
+      "create": 0,
+      "delete": 0,
+      "email": 1,
+      "export": 1,
+      "print": 1,
+      "report": 1,
+      "share": 1
+    },
+    {
+      "role": "Engraving User",
+      "read": 1,
+      "write": 0,
+      "create": 0,
+      "delete": 0,
+      "email": 0,
+      "export": 1,
+      "print": 1,
+      "report": 1,
+      "share": 0
+    }
+  ],
+  "quick_entry": 1,
+  "row_format": "Dynamic",
+  "rows_threshold_for_grid_search": 20,
+  "search_fields": "employee,employee_name,shift_date,status",
+  "sort_field": "creation",
+  "sort_order": "DESC",
+  "states": [],
+  "title_field": "employee_name",
+  "track_changes": 1,
+  "track_seen": 1,
+  "track_views": 1
+}

@@ -8,7 +8,7 @@ import frappe
 from frappe.utils import get_datetime
 from frappe.utils.background_jobs import enqueue
 
-from kreativ_attendance.attendance.service import recalculate_around
+from kreativ_attendance.attendance.service import recalculate_period
 
 
 def on_checkin_updated(doc, method=None):
@@ -66,26 +66,27 @@ def _enqueue_recalc(doc):
     # checkins for the same employee, and each full-month rebuild is
     # idempotent — one queued job per (employee, month) is enough. Without
     # this, N punches enqueue N identical rebuilds that can also race each
-    # other on parallel workers (duplicate Employee Shift rows).
+    # other on parallel workers (duplicate KG Employee Attendance Shift rows).
     #
     # Passes employee+time (not the checkin name) so the job also works
     # after the checkin row is gone (delete case).
     t = get_datetime(doc.time)
     try:
         enqueue(
-            "kreativ_attendance.attendance.service.recalculate_around",
+            "kreativ_attendance.attendance.service.recalculate_period",
             queue="default",
             timeout=120,
+            year=t.year,
+            month=t.month,
             employee=doc.employee,
-            time=str(t),
             now=False,
             enqueue_after_commit=True,
             deduplicate=True,
-            job_id=f"gravures-shift-recalc-{doc.employee}-{t.year}-{t.month:02d}",
+            job_id=f"kreativ-shift-recalc-{doc.employee}-{t.year}-{t.month:02d}",
         )
     except Exception:
         # If enqueue fails (no worker available), run inline
-        recalculate_around(doc.employee, t)
+        recalculate_period(t.year, t.month, employee=doc.employee)
 
 
 def on_salary_slip_whatsapp(doc, method=None):
@@ -106,8 +107,8 @@ def on_salary_slip_whatsapp(doc, method=None):
 def on_salary_slip_submit(doc, method=None):
     """Triggered when a Salary Slip is submitted/finalized.
 
-    Creates an Employee Shift Lock for the employee-month range, then
-    locks all Employee Shift records in that period so they cannot be
+    Creates a KG Employee Shift Lock for the employee-month range, then
+    locks all KG Employee Attendance Shift records in that period so they cannot be
     silently edited after payroll sign-off.
 
     Idempotent: if a lock already exists (unlocked_at is NULL), it's a no-op.
@@ -115,7 +116,7 @@ def on_salary_slip_submit(doc, method=None):
     if not doc.employee or not doc.start_date:
         return
 
-    from kreativ_attendance.attendance.lock import EmployeeShiftLock
+    from kreativ_attendance.attendance.lock import lock_period
     from frappe.utils import getdate
     import datetime
 
@@ -125,7 +126,7 @@ def on_salary_slip_submit(doc, method=None):
 
     # Check if lock already exists (idempotency)
     existing = frappe.db.get_value(
-        "Employee Shift Lock",
+        "KG Employee Shift Lock",
         [
             ["employee", "=", doc.employee],
             ["period_year", "=", year],
@@ -138,7 +139,7 @@ def on_salary_slip_submit(doc, method=None):
         return  # already locked
 
     # Create the lock
-    lock_doc = EmployeeShiftLock.lock_period(
+    lock_doc = lock_period(
         employee=doc.employee,
         year=year,
         month=month,
@@ -147,7 +148,7 @@ def on_salary_slip_submit(doc, method=None):
         reason=f"Salary Slip {doc.name} submitted for {year}-{month:02d}",
     )
 
-    # Apply lock flag to all Employee Shift records in this period
+    # Apply lock flag to all KG Employee Attendance Shift records in this period
     period_start = datetime.date(year, month, 1)
     if month == 12:
         period_end = datetime.date(year + 1, 1, 1)
@@ -155,7 +156,7 @@ def on_salary_slip_submit(doc, method=None):
         period_end = datetime.date(year, month + 1, 1)
 
     shifts = frappe.get_all(
-        "Employee Shift",
+        "KG Employee Attendance Shift",
         filters=[
             ["employee", "=", doc.employee],
             ["shift_date", ">=", period_start],
@@ -165,7 +166,7 @@ def on_salary_slip_submit(doc, method=None):
     )
     for shift_name in shifts:
         frappe.db.set_value(
-            "Employee Shift",
+            "KG Employee Attendance Shift",
             shift_name,
             {"locked": 1, "lock_period": lock_doc.name},
             update_modified=False,

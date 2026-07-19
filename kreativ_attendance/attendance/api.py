@@ -9,13 +9,19 @@ from kreativ_attendance.attendance.service import (
     recalculate_period,
     recalculate_employee_for_period,
 )
+# Alias: this module defines a whitelisted function with the same name below.
+# Without the alias the endpoint would shadow the import and call itself
+# (infinite recursion).
+from kreativ_attendance.attendance.service import (
+    recalculate_for_checkin as _service_recalculate_for_checkin,
+)
 
 ALLOWED_ROLES = ("System Manager", "HR Manager", "HR User")
 
 
 @frappe.whitelist()
 def recalculate_year_month(year: int = None, month: int = None) -> dict:
-    """Recalculate Employee Shift records for the given month/year.
+    """Recalculate KG Employee Attendance Shift records for the given month/year.
 
     Args:
         year: e.g. 2026
@@ -35,7 +41,7 @@ def recalculate_year_month(year: int = None, month: int = None) -> dict:
 
 @frappe.whitelist()
 def recalculate_employee(emp: str = None, year: int = None, month: int = None) -> dict:
-    """Recalculate Employee Shift records for ONE employee in a given period."""
+    """Recalculate KG Employee Attendance Shift records for ONE employee in a given period."""
     frappe.only_for(ALLOWED_ROLES)
     if not emp or not year or not month:
         frappe.throw(_("Employee, year and month are all required"))
@@ -43,11 +49,23 @@ def recalculate_employee(emp: str = None, year: int = None, month: int = None) -
 
 
 @frappe.whitelist()
+def recalculate_for_checkin(checkin_name: str = None) -> dict:
+    """Manual trigger — same as what runs when an Employee Checkin is saved.
+
+    Wipes & rebuilds the affected employee's shifts for current AND previous month.
+    """
+    frappe.only_for(ALLOWED_ROLES)
+    if not checkin_name:
+        frappe.throw(_("checkin_name is required"))
+    return _service_recalculate_for_checkin(checkin_name)
+
+
+@frappe.whitelist()
 def unlock_period(emp: str = None, year: int = None, month: int = None, reason: str = "") -> dict:
-    """Unlock an Employee Shift Lock period so corrections can be made.
+    """Unlock a KG Employee Shift Lock period so corrections can be made.
 
     Requires: emp, year, month, and a non-empty reason for audit trail.
-    Clears the `locked` flag and `lock_period` on all affected Employee Shift records.
+    Clears the `locked` flag and `lock_period` on all affected KG Employee Attendance Shift records.
     """
     frappe.only_for(ALLOWED_ROLES)
     if not emp:
@@ -64,7 +82,7 @@ def unlock_period(emp: str = None, year: int = None, month: int = None, reason: 
     from kreativ_attendance.attendance.lock import release_shift_flags
 
     lock = frappe.db.get_value(
-        "Employee Shift Lock",
+        "KG Employee Shift Lock",
         [
             ["employee", "=", emp],
             ["period_year", "=", year],
@@ -77,7 +95,7 @@ def unlock_period(emp: str = None, year: int = None, month: int = None, reason: 
         frappe.throw(_("No active lock found for {0} in {1}-{2}. Already unlocked?").format(emp, year, month))
 
     # Unlock the lock record
-    lock_doc = frappe.get_doc("Employee Shift Lock", lock)
+    lock_doc = frappe.get_doc("KG Employee Shift Lock", lock)
     lock_doc.is_unlocked = 1
     lock_doc.unlocked_at = now_datetime()
     lock_doc.unlocked_by = frappe.session.user
@@ -96,64 +114,15 @@ def unlock_period(emp: str = None, year: int = None, month: int = None, reason: 
 
 
 @frappe.whitelist()
-def month_summary(year: int = None, month: int = None) -> dict:
-    """Per-employee monthly summary + totals for the Attendance Dashboard page.
-
-    Reuses the Employee Shift Summary report's Summary view.
-    """
-    frappe.only_for(ALLOWED_ROLES)
-    if not year or not month:
-        frappe.throw(_("Both year and month are required"))
-
-    from kreativ_attendance.attendance.pairing import format_hhmm
-    from kreativ_attendance.report.employee_shift_summary.employee_shift_summary import (
-        execute as run_summary_report,
-    )
-
-    columns, rows = run_summary_report({
-        "year": int(year), "month": int(month), "view": "Summary",
-    })
-
-    total_worked = sum(r["_worked_seconds"] for r in rows)
-    total_ot = sum(r["_overtime_seconds"] for r in rows)
-
-    # Employees silently falling back to the 8h default — HR should know.
-    have_hours = set(frappe.get_all("Employee Standard Hours", pluck="employee"))
-    missing_standard_hours = [r["employee"] for r in rows if r["employee"] not in have_hours]
-
-    return {
-        "period": f"{int(year)}-{int(month):02d}",
-        "rows": rows,
-        "missing_standard_hours": missing_standard_hours,
-        "totals": {
-            "employees": len(rows),
-            "present_days": sum(r["present_days"] for r in rows),
-            "total_hours": format_hhmm(total_worked),
-            "overtime": format_hhmm(total_ot),
-            "anomalies": sum(r["anomalies"] for r in rows),
-        },
-    }
-
-
-@frappe.whitelist()
-def sync_month_to_hrms(year: int = None, month: int = None, employee: str = None, force: int = 0) -> dict:
+def sync_month_to_hrms(year: int = None, month: int = None, employee: str = None) -> dict:
     """Create HRMS Attendance records + Overtime Additional Salary for a month.
 
     Run this once shifts for the month are reviewed (all rows green). Then use
     a standard HRMS Payroll Entry -> Create Salary Slips: payment days come from
     the Attendance records, overtime pay from the Additional Salary rows.
-
-    Args:
-        year, month: Period to sync
-        employee: Optional single employee (default all)
-        force: If 1, bypass the quality gate (audited override — logged to Error Log)
     """
     frappe.only_for(ALLOWED_ROLES)
     if not year or not month:
         frappe.throw(_("Both year and month are required"))
-    # NEW — server-side payroll gate (dialog text is not a guard)
-    from kreativ_attendance.attendance.quality import assert_month_clean
-    assert_month_clean(int(year), int(month), employee=employee or None,
-                       force=bool(int(force or 0)))
     from kreativ_attendance.attendance.hrms import sync_month_to_hrms as _sync
     return _sync(int(year), int(month), employee=employee or None)

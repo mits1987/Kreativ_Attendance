@@ -1,4 +1,9 @@
-# NOTE: _get_openwa_settings and _openwa_headers removed in Item 15.
-# OpenWAClient handles configuration internally.
-# NOTE: _get_openwa_settings and _openwa_headers removed in Item 15.
-# OpenWAClient handles configuration internally via get_openwa_config().
+"""kreativ_attendance.attendance — attendance engine for Kreativ.
+
+Exports:
+    pairing: pure pairing logic (testable without Frappe)
+    service:  glue between pairing and Frappe DB + doctypes
+    lock:     Employee Shift Lock implementation
+    api:      whitelisted endpoints (recalculate, unlock, sync-to-HRMS)
+    hrms:     bridge to HRMS Attendance + Additional Salary
+"""

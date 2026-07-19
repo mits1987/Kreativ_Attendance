@@ -225,19 +225,27 @@ def create_employee_checkin(transaction):
             )
 
         # Check if checkin already exists (by employee + time + device)
+        # Search for device_id both with and without transaction_id suffix
         existing_checkin = frappe.db.exists(
             "Employee Checkin",
             {"employee": employee, "time": punch_datetime, "device_id": device_id},
         )
+        if not existing_checkin:
+            # Also try with the transaction_id suffix format
+            if transaction_id:
+                existing_checkin = frappe.db.exists(
+                    "Employee Checkin",
+                    {"employee": employee, "time": punch_datetime, "device_id": f"{device_id} (ZKTeco-{transaction_id})"},
+                )
         if existing_checkin:
             return "skip"
 
-        # Also check by transaction ID proximity
+        # Also check by transaction ID proximity (±5 seconds)
         if transaction_id:
             existing_by_id = frappe.db.get_value(
                 "Employee Checkin",
                 {
-                    "device_id": device_id,
+                    "device_id": ["like", f"{device_id}%"],
                     "employee": employee,
                     "time": [
                         "between",

@@ -1,0 +1,29 @@
+{
+  "actions": [],
+  "creation": "2026-07-19 12:00:00.000000",
+  "doctype": "Report",
+  "document_type": "KG Employee Attendance Shift",
+  "idx": 0,
+  "is_standard": "Yes",
+  "modified": "2026-07-19 12:00:00.000000",
+  "module": "kreativ_attendance",
+  "name": "KG Employee Shift Summary",
+  "owner": "Administrator",
+  "ref_doctype": "KG Employee Attendance Shift",
+  "report_name": "KG Employee Shift Summary",
+  "report_type": "Script Report",
+  "roles": [
+    {
+      "role": "System Manager"
+    },
+    {
+      "role": "HR Manager"
+    },
+    {
+      "role": "HR User"
+    },
+    {
+      "role": "Engraving User"
+    }
+  ]
+}

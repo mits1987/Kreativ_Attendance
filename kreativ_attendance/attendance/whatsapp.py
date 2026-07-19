@@ -67,7 +67,7 @@ def _get_shift_hours_for_out(employee: str, checkin_time: datetime) -> str:
         checkin_date = checkin_time.date()
         shift = frappe.db.get_value(
             "Employee Shift",
-            {"employee": employee, "shift_date": checkin_date},
+            {"employee": employee, "start_date": checkin_date},
             "worked_hours",
         )
         if shift:
@@ -77,7 +77,7 @@ def _get_shift_hours_for_out(employee: str, checkin_time: datetime) -> str:
         prev_date = checkin_date - timedelta(days=1)
         shift = frappe.db.get_value(
             "Employee Shift",
-            {"employee": employee, "shift_date": prev_date},
+            {"employee": employee, "start_date": prev_date},
             "worked_hours",
         )
         if shift:

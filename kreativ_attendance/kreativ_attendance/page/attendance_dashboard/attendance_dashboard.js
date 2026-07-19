@@ -156,7 +156,7 @@ frappe.pages['attendance-dashboard'].on_page_load = function(wrapper) {
 		var last_day = frappe.datetime.month_end(state.year + '-' + String(state.month).padStart(2, '0') + '-01');
 		frappe.route_options = {
 			status: ['in', ['Anomaly', 'Missing Check-Out']],
-			shift_date: ['between', [state.year + '-' + String(state.month).padStart(2, '0') + '-01', last_day]],
+			start_date: ['between', [state.year + '-' + String(state.month).padStart(2, '0') + '-01', last_day]],
 		};
 		if (employee) frappe.route_options.employee = employee;
 		frappe.set_route('List', 'Employee Shift', 'List');

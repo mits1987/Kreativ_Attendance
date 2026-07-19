@@ -3,11 +3,9 @@
 Public entrypoints:
     recalculate_period(year, month, employee=None) -> dict
     recalculate_employee_for_period(emp_id, year, month) -> dict
-    recalculate_for_checkin(checkin_name) -> dict   (checkin saved/edited)
-    recalculate_around(employee, time) -> dict      (checkin deleted; doc gone)
+    recalculate_from_checkin(checkin_name) -> dict  (called on save/edit)
 """
-from datetime import date, datetime, timedelta
-import time
+from datetime import datetime, timedelta
 import frappe
 from frappe.utils import get_datetime
 
@@ -17,28 +15,28 @@ from kreativ_attendance.attendance.pairing import (
     seconds_from_hours,
 )
 
-
 DEFAULT_STANDARD_SECONDS = 8 * 3600
+
+DOCTYPE = "KG Employee Attendance Shift"
+LOCK_DOCTYPE = "KG Employee Shift Lock"
+STANDARD_HOURS_DOCTYPE = "KG Employee Standard Hours"
 
 
 def build_standard_hours_map() -> dict:
-    """Return {employee_doc_name: standard_seconds} from Employee Standard Hours.
+    """Return {employee_doc_name: standard_seconds} from KG Employee Standard Hours.
 
     Key is the Employee document name (HR-EMP-XXXXX), not the ZKTeco code,
     because the translation to codes happens at lookup time in recalculate_period.
 
     Falls back to Employee.default_shift -> Shift Type (start_time/end_time) if
-    Employee Standard Hours record doesn't exist.
+    KG Employee Standard Hours record doesn't exist.
     """
-    # First, get explicit Employee Standard Hours records
-    try:
-        esh_rows = frappe.db.get_all(
-            "Employee Standard Hours",
-            fields=["employee", "standard_hours"],
-        )
-    except frappe.DoesNotExistError:
-        esh_rows = []
-    standard_map = {r["employee"]: seconds_from_hours(r["standard_hours"]) for r in esh_rows}
+    # First, get explicit KG Employee Standard Hours records
+    rows = frappe.db.get_all(
+        STANDARD_HOURS_DOCTYPE,
+        fields=["employee", "standard_hours"],
+    )
+    standard_map = {r["employee"]: seconds_from_hours(r["standard_hours"]) for r in rows}
 
     # Build fallback map from Employee.default_shift -> Shift Type duration
     shift_map = _build_shift_hours_fallback_map()
@@ -94,7 +92,7 @@ def _build_shift_hours_fallback_map() -> dict:
 
 
 def default_standard_seconds(standard_map: dict, employee: str) -> int:
-    """Return per-employee standard, or 8h default if not set anywhere."""
+    """Return per-employee standard, or 8h default if not set."""
     return standard_map.get(employee) or DEFAULT_STANDARD_SECONDS
 
 
@@ -107,9 +105,19 @@ def fetch_checkins_for_period(start: datetime, end: datetime, employee: str = No
     records = frappe.db.get_all(
         "Employee Checkin",
         filters=filters,
-        fields=["name", "employee", "time", "log_type"],
+        fields=["name", "employee", "employee_name", "time", "log_type", "device_id"],
         order_by="employee, time",
     )
+
+    # Add helper field for raw type detection (the device_id encodes original punch state).
+    # In real data, 'device_id' looks like "Auto add (ZKTeco-26897)" — original "Break"
+    # punches have it preserved in device_id text per the user's script.
+    for r in records:
+        dev = r.get("device_id") or ""
+        if "BREAK" in dev.upper():
+            r["_raw_log_type"] = "Break In" if r["log_type"] == "IN" else "Break Out"
+        else:
+            r["_raw_log_type"] = ""
 
     grouped = {}
     for r in records:
@@ -127,25 +135,23 @@ def _serialize_checkin_for_pairing(checkins):
         out.append({
             "time": ct,
             "log_type": c["log_type"],
+            "log_type_raw": c.get("_raw_log_type", ""),
             "checkin_name": c["name"],
+            "employee": c.get("employee"),
+            "employee_name": c.get("employee_name"),
+            "device_id": c.get("device_id"),
         })
     return out
 
 
 def delete_existing_shifts(year: int, month: int, employee: str = None,
                            exclude_employees: set = None) -> int:
-    """Wipe Employee Shift rows for the period before recalc. Returns count deleted.
+    """Wipe KG Employee Attendance Shift rows for the period before recalc. Returns count deleted.
 
     Deletes ONLY shifts dated inside the target month. shift_date is always the
     check-in date and pairs are bucketed by check-in month, so the ±2 day fetch
     window (needed to *pair* cross-month checkins) must never widen the delete —
     otherwise a May recalc destroys June 1-2 shifts it will not recreate.
-
-    Uses a single bulk SQL DELETE instead of per-doc frappe.delete_doc().
-    Hook-free by design: Employee Shift has no custom-coded hooks in this
-    app, and a bulk recalc is a system-internal operation, not user-triggered.
-
-    Retries with exponential backoff on lock-wait timeouts (up to 5 attempts).
 
     No commit here: recalculate_period commits once after the rebuild, so a
     failed rebuild rolls the deletes back instead of losing the month.
@@ -155,49 +161,27 @@ def delete_existing_shifts(year: int, month: int, employee: str = None,
         datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)
     )
 
-    # Build WHERE clause parts
-    conditions = [
-        "shift_date >= %(period_start)s",
-        "shift_date < %(period_end)s",
+    filters = [
+        ["shift_date", ">=", period_start.date()],
+        ["shift_date", "<", period_end.date()],
     ]
-    params = {
-        "period_start": period_start.date(),
-        "period_end": period_end.date(),
-    }
     if employee:
-        conditions.append("employee = %(employee)s")
-        params["employee"] = employee
+        filters = [["employee", "=", employee]] + filters
     if exclude_employees:
-        conditions.append("employee NOT IN %(excluded)s")
-        params["excluded"] = list(exclude_employees)
+        filters.append(["employee", "not in", list(exclude_employees)])
 
-    where_clause = " AND ".join(conditions)
-    count_sql = f"SELECT COUNT(*) FROM `tabEmployee Shift` WHERE {where_clause}"
-    count = frappe.db.sql(count_sql, params)[0][0]
-    if not count:
+    names = frappe.db.get_all(DOCTYPE, filters=filters, pluck="name")
+    if not names:
         return 0
-
-    delete_sql = f"DELETE FROM `tabEmployee Shift` WHERE {where_clause}"
-
-    # Retry on lock-wait timeouts with exponential backoff
-    max_attempts = 5
-    for attempt in range(max_attempts):
-        try:
-            frappe.db.sql(delete_sql, params)
-            return count
-        except frappe.exceptions.QueryTimeoutError:
-            if attempt == max_attempts - 1:
-                raise
-            wait = 0.5 * (2 ** attempt)  # 0.5s, 1s, 2s, 4s, 8s
-            time.sleep(wait)
-            frappe.db.rollback()
-    return 0
+    for n in names:
+        frappe.delete_doc(DOCTYPE, n, ignore_permissions=True)
+    return len(names)
 
 
 def create_shift_record(employee, paired_shift) -> str:
-    """Insert one Employee Shift. Returns name."""
+    """Insert one KG Employee Attendance Shift. Returns name."""
     doc = frappe.get_doc({
-        "doctype": "Employee Shift",
+        "doctype": DOCTYPE,
         "employee": employee,
         "shift_date": paired_shift["shift_date"],
         "check_in": paired_shift["check_in_time"],
@@ -216,101 +200,40 @@ def create_shift_record(employee, paired_shift) -> str:
     return doc.name
 
 
-# ---------------------------------------------------------------------------
-# Bulk insert — used by recalculate_period for performance
-# ---------------------------------------------------------------------------
-
-_SHIFT_FIELDS = [
-    "name", "employee", "shift_date", "check_in", "check_out",
-    "worked_hours", "overtime_hours", "worked_seconds", "overtime_seconds",
-    "standard_hours", "check_in_record", "check_out_record",
-    "status", "anomaly_reason",
-]
-
-
-def _bulk_insert_shifts(emp: str, standard: float,
-                        paired_shifts: list, anomalies: list,
-                        year: int, month: int):
-    """Insert all Employee Shift records for one employee in a single bulk INSERT.
-
-    Paired shifts and anomaly rows are inserted together.  Returns
-    (paired_count, anomaly_count).
-    """
-    import uuid
-    values = []
-
-    for p in paired_shifts:
-        p["standard_hours"] = standard / 3600.0
-        values.append((
-            str(uuid.uuid4()).replace("-", "")[:24],
-            emp,
-            p["shift_date"],
-            p["check_in_time"],
-            p.get("check_out_time"),
-            format_hhmm(p["total_seconds"]),
-            format_hhmm(p["overtime_seconds"]),
-            p["total_seconds"],
-            p["overtime_seconds"],
-            p.get("standard_hours", 8.0),
-            p.get("check_in_name"),
-            p.get("check_out_name"),
-            "Paired" if p.get("check_out_time") else "Missing Check-Out",
-            "" if p.get("check_out_time") else "missing_checkout",
-        ))
-
-    for a in anomalies:
-        a_time = a["time"]
-        if not (a_time.year == year and a_time.month == month):
-            continue
-        values.append((
-            str(uuid.uuid4()).replace("-", "")[:24],
-            emp,
-            a_time.date() if hasattr(a_time, "date") else a_time,
-            a_time if a.get("log_type") == "IN" else None,
-            a_time if a.get("log_type") == "OUT" else None,
-            "",
-            "",
-            0,
-            0,
-            standard / 3600.0 if standard else 8,
-            a.get("checkin_name") if a.get("log_type") == "IN" else None,
-            a.get("checkin_name") if a.get("log_type") == "OUT" else None,
-            "Anomaly",
-            _map_anomaly_reason(a.get("reason", "")),
-        ))
-
-    if not values:
-        return 0, 0
-
-    frappe.db.bulk_insert("Employee Shift", _SHIFT_FIELDS, values)
-    return len(paired_shifts), len(values) - len(paired_shifts)
-
-
 def has_active_lock(employee: str, year: int, month: int) -> bool:
-    """Return True if there is a non-unlocked Employee Shift Lock for this (emp, year, month).
+    """Return True if there is a non-unlocked KG Employee Shift Lock for this (emp, year, month).
 
     An active lock has unlocked_at == None. Used by recalculate_period / recalculate_for_checkin
     to refuse re-pairing if the period is payroll-finalized.
     """
-    try:
-        name = frappe.db.get_value(
-            "Employee Shift Lock",
-            [
-                ["employee", "=", employee],
-                ["period_year", "=", int(year)],
-                ["period_month", "=", int(month)],
-                ["unlocked_at", "is", "not set"],
-            ],
-            "name",
-        )
-    except frappe.DoesNotExistError:
-        return False
+    name = frappe.db.get_value(
+        LOCK_DOCTYPE,
+        [
+            ["employee", "=", employee],
+            ["period_year", "=", int(year)],
+            ["period_month", "=", int(month)],
+            ["unlocked_at", "is", "not set"],
+        ],
+        "name",
+    )
     return bool(name)
+
+
+def _map_anomaly_reason(reason: str) -> str:
+    """Map internal pairing reason -> doctype Anomaly Reason select values."""
+    r = reason.lower()
+    if "break" in r:
+        return "break_punch"
+    if "carryover" in r:
+        return "previous_month_carryover"
+    if "unpaired" in r or "missing" in r:
+        return "missing_checkout"
+    return ""
 
 
 def recalculate_period(year: int, month: int, employee: str = None) -> dict:
     """
-    Wipe & rebuild Employee Shift records for the given month.
+    Wipe & rebuild KG Employee Attendance Shift records for the given month.
     Includes cross-month carryover (extends window by ±2 days).
 
     Returns {employees_processed, paired, anomalies, deleted}.
@@ -330,21 +253,18 @@ def recalculate_period(year: int, month: int, employee: str = None) -> dict:
     # PRE-FLIGHT: never delete/rewrite a payroll-locked employee-month.
     # Single-employee recalc: throw (the caller explicitly asked for this employee).
     # Bulk recalc: skip locked employees so one payroll lock doesn't block everyone.
-    try:
-        locked_emps = set(frappe.db.get_all(
-            "Employee Shift Lock",
-            filters=[
-                ["period_year", "=", int(year)],
-                ["period_month", "=", int(month)],
-                ["unlocked_at", "is", "not set"],
-            ],
-            pluck="employee",
-        ))
-    except frappe.DoesNotExistError:
-        locked_emps = set()
+    locked_emps = set(frappe.db.get_all(
+        LOCK_DOCTYPE,
+        filters=[
+            ["period_year", "=", int(year)],
+            ["period_month", "=", int(month)],
+            ["unlocked_at", "is", "not set"],
+        ],
+        pluck="employee",
+    ))
     if employee and employee in locked_emps:
         frappe.throw(
-            f"Cannot recalculate: an Employee Shift Lock for "
+            f"Cannot recalculate: a KG Employee Shift Lock for "
             f"{employee} / {year}-{month:02d} is active. "
             "Click 'Unlock Period' on the lock record with a reason to allow edits."
         )
@@ -371,9 +291,35 @@ def recalculate_period(year: int, month: int, employee: str = None) -> dict:
             period_month=month,
         )
 
-        pc, ac = _bulk_insert_shifts(emp, standard, paired, anomalies, year, month)
-        total_paired += pc
-        total_anomalies += ac
+        for p in paired:
+            p["standard_hours"] = standard / 3600.0
+            create_shift_record(emp, p)
+            total_paired += 1
+
+        # Anomalies: persist as separate KG Employee Attendance Shift with status = "Anomaly".
+        # Only for the target month — checkins from the ±2 day fetch window
+        # belong to the adjacent month's recalc, and persisting them here
+        # creates phantom anomaly rows at month edges.
+        for a in anomalies:
+            a_time = a["time"]
+            if not (a_time.year == year and a_time.month == month):
+                continue
+            doc = frappe.get_doc({
+                "doctype": DOCTYPE,
+                "employee": emp,
+                "shift_date": a["time"].date() if hasattr(a["time"], "date") else a["time"],
+                "check_in": a["time"] if a.get("log_type") == "IN" else None,
+                "check_out": a["time"] if a.get("log_type") == "OUT" else None,
+                "worked_hours": "",
+                "overtime_hours": "",
+                "standard_hours": standard / 3600.0 if standard else 8,
+                "status": "Anomaly",
+                "anomaly_reason": _map_anomaly_reason(a.get("reason", "")),
+                "check_in_record": a.get("checkin_name") if a.get("log_type") == "IN" else None,
+                "check_out_record": a.get("checkin_name") if a.get("log_type") == "OUT" else None,
+            })
+            doc.insert(ignore_permissions=True)
+            total_anomalies += 1
 
     frappe.db.commit()
     return {
@@ -386,53 +332,24 @@ def recalculate_period(year: int, month: int, employee: str = None) -> dict:
     }
 
 
-def _map_anomaly_reason(reason: str) -> str:
-    """Map internal pairing reason → doctype Anomaly Reason select values."""
-    r = reason.lower()
-    if "carryover" in r:
-        return "previous_month_carryover"
-    if "unpaired" in r or "missing" in r:
-        return "missing_checkout"
-    return ""
-
-
 def recalculate_employee_for_period(emp_id: str, year: int, month: int) -> dict:
     return recalculate_period(year, month, employee=emp_id)
 
 
 def recalculate_for_checkin(checkin_name: str) -> dict:
-    """Called after Employee Checkin save / edit."""
+    """Called after Employee Checkin save / edit. Wipes & rebuilds the affected employee's
+    shifts for the month containing that checkin (and previous month, because of carryovers)."""
     c = frappe.get_doc("Employee Checkin", checkin_name)
-    return recalculate_around(c.employee, c.time)
-
-
-def recalculate_around(employee: str, time) -> dict:
-    """Rebuild the employee's shifts for the month containing `time`, plus any
-    neighboring month whose pairing window overlaps that punch.
-
-    Each month's pairing fetches checkins from a ±2 day window, so a punch can
-    only affect the previous month if it falls on day 1-2, and the next month
-    if it falls on the last 2 days. Anything else would be a full rebuild that
-    changes nothing. Payroll-locked neighbor months are skipped quietly.
-
-    Takes (employee, time) rather than a checkin name so it also works after
-    the checkin has been DELETED (removing a bogus punch must rebuild too).
-    """
-    t = get_datetime(time)
+    t = get_datetime(c.time)
     year, month = t.year, t.month
-    result = {"current": recalculate_employee_for_period(employee, year, month)}
-
-    def _neighbor(y, m):
-        if has_active_lock(employee, y, m):
-            return {"skipped": "locked", "period": f"{y}-{m:02d}"}
-        return recalculate_employee_for_period(employee, y, m)
-
-    if t.day <= 2:
-        py, pm = (year, month - 1) if month > 1 else (year - 1, 12)
-        result["previous"] = _neighbor(py, pm)
-
-    next_start = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
-    if (next_start - t.date()).days <= 2:
-        result["next"] = _neighbor(next_start.year, next_start.month)
-
-    return result
+    result = recalculate_employee_for_period(c.employee, year, month)
+    # also re-process previous month for carryover that may now belong to it —
+    # unless that month is payroll-locked (normal after month-end); the checkin
+    # being edited belongs to the current month, so just skip quietly instead
+    # of failing the background job.
+    prev_year, prev_month = (year, month - 1) if month > 1 else (year - 1, 12)
+    if has_active_lock(c.employee, prev_year, prev_month):
+        prev = {"skipped": "locked", "period": f"{prev_year}-{prev_month:02d}"}
+    else:
+        prev = recalculate_employee_for_period(c.employee, prev_year, prev_month)
+    return {"current": result, "previous": prev}

@@ -1,6 +1,6 @@
 # Copyright (c) 2026, kreativ-gravures
 # License: MIT
-"""Employee Shift Summary — Script Report.
+"""KG Employee Shift Summary — Script Report.
 
 Two views (filter "View"):
   Detail  — one row per shift: IN, OUT, worked, overtime, status.
@@ -32,7 +32,7 @@ def execute(filters=None):
         conditions.append(["employee", "=", f.employee])
 
     shifts = frappe.get_all(
-        "Employee Shift",
+        "KG Employee Attendance Shift",
         filters=conditions,
         fields=[
             "name", "employee", "employee_name", "department", "shift_date",
@@ -59,7 +59,7 @@ def _detail(shifts):
         {"fieldname": "overtime_hours", "label": "Overtime (HH:MM)", "fieldtype": "Data", "width": 110},
         {"fieldname": "status", "label": "Status", "fieldtype": "Data", "width": 120},
         {"fieldname": "locked", "label": "Locked", "fieldtype": "Check", "width": 70},
-        {"fieldname": "name", "label": "Shift", "fieldtype": "Link", "options": "Employee Shift", "width": 120},
+        {"fieldname": "name", "label": "Shift", "fieldtype": "Link", "options": "KG Employee Attendance Shift", "width": 120},
     ]
     return columns, shifts
 
@@ -93,10 +93,6 @@ def _summary(shifts):
             "total_hours": format_hhmm(e["worked"]),
             "overtime": format_hhmm(e["overtime"]),
             "anomalies": e["anomalies"],
-            # raw seconds for consumers that need totals (dashboard);
-            # not in columns, so the report UI ignores them
-            "_worked_seconds": e["worked"],
-            "_overtime_seconds": e["overtime"],
         })
 
     columns = [

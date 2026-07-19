@@ -16,10 +16,10 @@ class TestQuality(unittest.TestCase):
         from kreativ_attendance.attendance.quality import format_issues
         out = format_issues({
             "anomalies": [{"employee": "HR-1", "employee_name": "Dablu",
-                           "shift_date": "2026-06-14", "status": "Missing Check-Out",
+                           "start_date": "2026-06-14", "status": "Missing Check-Out",
                            "anomaly_reason": "missing_checkout", "name": "S1"}],
             "long_sessions": [{"employee": "HR-2", "employee_name": "Shivam",
-                               "shift_date": "2026-06-09", "worked_hours": "20:26",
+                               "start_date": "2026-06-09", "worked_hours": "20:26",
                                "worked_seconds": 73560, "name": "S2"}],
             "break_punches": [{"employee": "HR-3", "time": "2026-06-05 18:01:00",
                                "punch_state_raw": "2", "name": "C1"}],
