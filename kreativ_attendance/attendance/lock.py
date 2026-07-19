@@ -122,3 +122,15 @@ def lock_period(employee, year, month, salary_slip, locked_by, reason="Salary Sl
 
     frappe.db.commit()
     return doc
+
+
+class EmployeeShiftLock:
+    """Wrapper class for backwards-compatibility with tests expecting a class."""
+
+    @staticmethod
+    def lock_period(employee, year, month, salary_slip, locked_by, reason="Salary Slip submitted"):
+        return lock_period(employee, year, month, salary_slip, locked_by, reason)
+
+    @staticmethod
+    def release_shift_flags(employee, year, month):
+        return release_shift_flags(employee, year, month)

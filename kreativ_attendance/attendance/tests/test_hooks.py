@@ -26,7 +26,7 @@ class TestHooks(unittest.TestCase):
                 on_checkin_updated(fake_doc, method="on_update")
 
         self.assertEqual(captured["method"],
-                         "kreativ_attendance.attendance.service.recalculate_around")
+                         "kreativ_attendance.attendance.service.recalculate_period")
         self.assertEqual(captured["kwargs"]["employee"], "HR-EMP-1")
         self.assertIs(captured["kwargs"]["now"], False,
                        "should be queued, not run synchronously")
@@ -37,9 +37,13 @@ class TestHooks(unittest.TestCase):
         from kreativ_attendance.attendance.hooks import on_checkin_updated
 
         fake_frappe = MagicMock()
+        called = {}
 
         def fake_enqueue_fail(*args, **kwargs):
             raise Exception("no worker")
+
+        def fake_recalc(year, month, employee):
+            called["rec"] = True
 
         fake_doc = type("FakeDoc", (), {
             "name": "EC-FALLBACK-9",
@@ -49,8 +53,11 @@ class TestHooks(unittest.TestCase):
 
         with patch("kreativ_attendance.attendance.hooks.frappe", fake_frappe):
             with patch("kreativ_attendance.attendance.hooks.enqueue", fake_enqueue_fail):
-                # Should not raise — new code logs and continues
-                on_checkin_updated(fake_doc, method="on_update")
+                with patch("kreativ_attendance.attendance.hooks.recalculate_period", fake_recalc):
+                    # Should not raise — fallback calls recalculate_period inline
+                    on_checkin_updated(fake_doc, method="on_update")
+
+        self.assertTrue(called.get("rec"), "fallback should call recalculate_period inline")
 
     def test_reentrance_guard_removed(self):
         """Reentrance guard was removed in latest hooks. Verify hook still
