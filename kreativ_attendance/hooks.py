@@ -1,3 +1,10 @@
+# ---------------------------------------------------------------------------
+# MERGE NOTE: reconstructed during the WhatsApp-stack consolidation.
+# Diff against your current hooks.py before replacing — keep any extra
+# sections (workspaces, extra fixtures) your version has. Changes marked
+# with  # CHANGED / # REMOVED comments.
+# ---------------------------------------------------------------------------
+
 app_name = "kreativ_attendance"
 app_title = "Kreativ Attendance"
 app_publisher = "Mitesh"
@@ -15,43 +22,60 @@ doctype_form_js = {
     "KG Employee Attendance Shift": "public/js/kg_employee_attendance_shift_form.js"
 }
 
-# Document Events
+# ---------------------------------------------------------------------------
+# Document Events — ATTENDANCE CONCERNS ONLY.
+#
+# CHANGED: this app no longer wires any kreativ_notification.* handlers.
+# The old wiring pointed at "kreativ_notification.notification.hooks.*",
+# a module path that didn't exist in that package — those doc events were
+# raising ImportError on every checkin save. WhatsApp notification for
+# Employee Checkin (after_insert) and Salary Slip (on_submit) is now wired
+# inside kreativ_notification/hooks.py itself. Frappe merges doc_events
+# across installed apps, so both recalc (here) and notify (there) fire.
+# ---------------------------------------------------------------------------
 doc_events = {
     "Employee Checkin": {
-        "on_change": "kreativ_notification.notification.hooks.on_checkin_updated",
-        "on_trash": "kreativ_notification.notification.hooks.on_checkin_trashed",
-        "after_insert": "kreativ_notification.notification.hooks.on_checkin_created"
+        # on_change fires on create AND edit -> covers both for recalc.
+        "on_change": "kreativ_attendance.attendance.hooks.on_checkin_updated",
+        "on_trash": "kreativ_attendance.attendance.hooks.on_checkin_trashed",
     },
     "Salary Slip": {
-        "on_submit": [
-            "kreativ_attendance.attendance.hooks.on_salary_slip_submit",
-            "kreativ_notification.notification.salary_slip_hooks.on_salary_slip_whatsapp"
-        ]
-    }
+        # Payroll lock only. WhatsApp delivery: kreativ_notification.
+        "on_submit": "kreativ_attendance.attendance.hooks.on_salary_slip_submit",
+    },
 }
 
-# Scheduled Tasks
+# ---------------------------------------------------------------------------
+# Scheduled Tasks — ATTENDANCE CONCERNS ONLY.
+#
+# REMOVED: check_openwa_session, check_inbound_webhook_health and
+# retry_missed_notifications — all owned by kreativ_notification/hooks.py
+# now. Having them here meant they'd silently stop if kreativ_attendance
+# were ever uninstalled, and ran double if both apps listed them.
+# ---------------------------------------------------------------------------
 scheduler_events = {
     "cron": {
         "*/5 * * * *": [
-            "kreativ_notification.notification.health.check_openwa_session",
             "kreativ_attendance.attendance.zkteco_sync.scheduled_sync",
-            "kreativ_notification.notification.health.check_inbound_webhook_health",
-        ],
-        "*/10 * * * *": [
-            "kreativ_notification.notification.employee_notifications.retry_missed_notifications"
         ],
         # 02:30 on the 1st of every month — close the previous month
         "30 2 1 * *": [
-            "kreativ_attendance.attendance.monthly.monthly_close"
+            "kreativ_attendance.attendance.monthly.monthly_close",
         ],
     },
     "daily": [
-        "kreativ_attendance.install.validate_scheduled_jobs"
-    ]
+        "kreativ_attendance.install.validate_scheduled_jobs",
+    ],
 }
 
+# ---------------------------------------------------------------------------
 # Custom Fields to create on target doctypes
+#
+# NOTE: whatsapp_retry_count is retired (dispatcher owns retries) but the
+# field is intentionally KEPT so historical data survives and no patch is
+# needed. whatsapp_sent semantics simplified: 0/None=pending, 1=dispatched,
+# 3=invalid number (2 is no longer written).
+# ---------------------------------------------------------------------------
 custom_fields = {
     "Employee Checkin": [
         {
@@ -62,7 +86,7 @@ custom_fields = {
             "read_only": 1,
             "no_copy": 1,
             "default": 0,
-            "description": "0=not sent, 1=sent, 2=failed (retry), 3=invalid number (stop)",
+            "description": "0=pending, 1=handed to dispatcher (see WhatsApp Send Log), 3=invalid number (stop)",
         },
         {
             "fieldname": "whatsapp_retry_count",
@@ -72,7 +96,7 @@ custom_fields = {
             "read_only": 1,
             "no_copy": 1,
             "default": 0,
-            "description": "Number of times WhatsApp send has been attempted",
+            "description": "DEPRECATED — transport retries now tracked in WhatsApp Send Log",
         },
         {
             "fieldname": "punch_state_raw",
@@ -103,7 +127,7 @@ custom_fields = {
             "no_copy": 1,
             "description": "Period identifier (YYYY-MM) this shift row belongs to for the lock",
         },
-    ]
+    ],
 }
 
 # Fixtures
@@ -120,11 +144,5 @@ after_migrate = "kreativ_attendance.install.after_migrate"
 patches = [
     "kreativ_attendance.patches.v16_0.add_openwa_settings_fields",
     "kreativ_attendance.patches.v16_0.add_punch_state_raw_field",
-    "kreativ_attendance.patches.v16_0.add_openwa_webhook_fields"
+    "kreativ_attendance.patches.v16_0.add_openwa_webhook_fields",
 ]
-
-# Update website context
-# kreativ_attendance doesn't need its own login_marker - gravures_custom provides the environment banner
-# update_website_context = [
-#     "kreativ_attendance.login_marker.update_website_context"
-# ]
