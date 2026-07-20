@@ -1,7 +1,7 @@
-// Formatter for Employee Shift — color-renders the status field and worked_hours.
+// Formatter for KG Employee Attendance Shift — color-renders the status field and worked_hours.
 // Bound via the doctype's __init__.py get_formatter_dict/indicator functions.
 
-frappe.ui.form.on('Employee Shift', {
+frappe.ui.form.on('KG Employee Attendance Shift', {
     refresh(frm) {
         const s = frm.doc.status;
         const wrap = frm.fields_dict.status.$wrapper;

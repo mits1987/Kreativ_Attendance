@@ -18,14 +18,14 @@ doctype_form_js = {
 # Document Events
 doc_events = {
     "Employee Checkin": {
-        "on_change": "kreativ_attendance.attendance.hooks.on_checkin_updated",
-        "on_trash": "kreativ_attendance.attendance.hooks.on_checkin_trashed",
-        "after_insert": "kreativ_attendance.attendance.hooks.on_checkin_created"
+        "on_change": "kreativ_notification.notification.hooks.on_checkin_updated",
+        "on_trash": "kreativ_notification.notification.hooks.on_checkin_trashed",
+        "after_insert": "kreativ_notification.notification.hooks.on_checkin_created"
     },
     "Salary Slip": {
         "on_submit": [
             "kreativ_attendance.attendance.hooks.on_salary_slip_submit",
-            "kreativ_attendance.attendance.hooks.on_salary_slip_whatsapp"
+            "kreativ_notification.notification.salary_slip_hooks.on_salary_slip_whatsapp"
         ]
     }
 }
@@ -34,11 +34,12 @@ doc_events = {
 scheduler_events = {
     "cron": {
         "*/5 * * * *": [
-            "kreativ_attendance.attendance.openwa_health.check_openwa_session",
+            "kreativ_notification.notification.health.check_openwa_session",
             "kreativ_attendance.attendance.zkteco_sync.scheduled_sync",
+            "kreativ_notification.notification.health.check_inbound_webhook_health",
         ],
         "*/10 * * * *": [
-            "kreativ_attendance.attendance.whatsapp.retry_missed_notifications"
+            "kreativ_notification.notification.employee_notifications.retry_missed_notifications"
         ],
         # 02:30 on the 1st of every month — close the previous month
         "30 2 1 * *": [
@@ -118,7 +119,8 @@ after_migrate = "kreativ_attendance.install.after_migrate"
 # Patches
 patches = [
     "kreativ_attendance.patches.v16_0.add_openwa_settings_fields",
-    "kreativ_attendance.patches.v16_0.add_punch_state_raw_field"
+    "kreativ_attendance.patches.v16_0.add_punch_state_raw_field",
+    "kreativ_attendance.patches.v16_0.add_openwa_webhook_fields"
 ]
 
 # Update website context
