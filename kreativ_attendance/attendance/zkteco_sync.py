@@ -267,15 +267,11 @@ def create_employee_checkin(transaction):
                     f"{device_id} (ZKTeco-{transaction_id})" if transaction_id else device_id or "ZKTeco Device"
                 ),
                 "skip_auto_attendance": 0,
+                # Preserve raw device state before insert — single write
+                "punch_state_raw": state if frappe.db.has_column("Employee Checkin", "punch_state_raw") else None,
             }
         )
         checkin.insert(ignore_permissions=True)
-
-        # Preserve the raw device state so quality.py can flag Break/OT
-        # punches and HR can see exactly what button was pressed.
-        if frappe.db.has_column("Employee Checkin", "punch_state_raw"):
-            checkin.punch_state_raw = state
-            checkin.save(ignore_permissions=True)
 
         # Non-standard states (Break/Overtime) are payroll-relevant: log so
         # they show up in Error Log even before the quality gate runs.
@@ -298,7 +294,7 @@ def create_employee_checkin(transaction):
 
 
 def sync_zkteco_transactions():
-    """Main sync — fetches punches from last 7 days and creates Employee Checkins."""
+    """Main sync — fetches punches from last_sync (with 6h overlap) and creates Employee Checkins."""
     cfg = frappe.get_single("ZKTeco Config")
     if not cfg.enable_sync:
         return
@@ -306,8 +302,13 @@ def sync_zkteco_transactions():
     try:
         current_time = now_datetime()
 
-        # 7-day lookback from start of today to catch missed punches
-        lookback_start = get_datetime(f"{today()} 00:00:00") - timedelta(days=7)
+        # Use last_sync with 6-hour overlap instead of flat 7-day lookback
+        last_sync = cfg.last_sync
+        if last_sync:
+            lookback_start = get_datetime(last_sync) - timedelta(hours=6)
+        else:
+            # First run: 7 days back
+            lookback_start = get_datetime(f"{today()} 00:00:00") - timedelta(days=7)
 
         token_result = get_jwt_token()
         if not token_result or not token_result[0]:
@@ -360,16 +361,16 @@ def scheduled_sync():
             return
 
         sync_seconds = int(cfg.seconds or 300)
-        if sync_seconds < 60:
-            last_run = frappe.cache().get_value("zkteco_last_sync_run")
-            current_time = now_datetime()
+        # Throttle unconditionally using cache-based timestamp
+        last_run = frappe.cache().get_value("zkteco_last_sync_run")
+        current_time = now_datetime()
 
-            if last_run:
-                time_diff = (current_time - get_datetime(last_run)).total_seconds()
-                if time_diff < sync_seconds:
-                    return
+        if last_run:
+            time_diff = (current_time - get_datetime(last_run)).total_seconds()
+            if time_diff < sync_seconds:
+                return
 
-            frappe.cache().set_value("zkteco_last_sync_run", current_time)
+        frappe.cache().set_value("zkteco_last_sync_run", current_time)
 
         sync_zkteco_transactions()
 
