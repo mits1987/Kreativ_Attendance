@@ -55,7 +55,14 @@ def _period(year: int, month: int):
 
 
 def long_session_seconds() -> int:
-    hours = frappe.conf.get("kreativ_long_session_hours") or DEFAULT_LONG_SESSION_HOURS
+    """Read threshold from HR Settings (kreativ_long_session_hours) or site_config fallback."""
+    try:
+        hours = frappe.db.get_single_value("HR Settings", "kreativ_long_session_hours")
+    except Exception:
+        hours = None
+    if hours is None:
+        hours = frappe.conf.get("kreativ_long_session_hours")
+    hours = hours or DEFAULT_LONG_SESSION_HOURS
     return int(float(hours) * 3600)
 
 

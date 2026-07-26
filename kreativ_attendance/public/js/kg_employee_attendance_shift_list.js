@@ -1,40 +1,95 @@
 // KG Employee Attendance Shift list view — row coloring + clickable check-in/out times.
 // Registered via hooks.py doctype_list_js.
 //
+// Color scheme (single source of truth: _classify() below):
+//   green      good pair (Paired/Manual, worked <= LONG_SESSION_HOURS)
+//   light red  missing one punch (Missing Check-Out / unpaired anomaly, break punch)
+//   orange     paired but worked > LONG_SESSION_HOURS — almost always a missed
+//              middle punch that merged two days; this is what the quality gate
+//              blocks month-close on, so it must be visible here too.
+//   grey       locked by a submitted Salary Slip (payroll-finalized)
+//   blue       manual correction (and not otherwise flagged)
+//
 // Clicking a Check-In or Check-Out TIME opens the underlying Employee Checkin
 // record, so a wrong punch (IN selected instead of OUT, or vice versa) can be
 // corrected right there. Shifts rebuild automatically a few seconds after the
 // checkin is saved.
 
-frappe.listview_settings['KG Employee Attendance Shift'] = frappe.listview_settings['KG Employee Attendance Shift'] || {};
+frappe.listview_settings['KG Employee Attendance Shift'] =
+    frappe.listview_settings['KG Employee Attendance Shift'] || {};
 
-// Ensure the fields we need are always fetched for the list rows
+// Threshold for "long session" — fetched from HR Settings (kreativ_long_session_hours)
+// Falls back to 13h if not configured. Kept in sync with attendance/quality.py.
+var LONG_SESSION_HOURS = 13;
+var LONG_SESSION_SECONDS = LONG_SESSION_HOURS * 3600;
+var _threshold_loaded = false;
+
+// Fields the classifier needs on every row.
 frappe.listview_settings['KG Employee Attendance Shift'].add_fields = [
     'status', 'locked', 'anomaly_reason', 'manual_correction',
-    'check_in_record', 'check_out_record',
+    'worked_seconds', 'check_in_record', 'check_out_record',
 ];
+
+// ============================================================================
+// CLASSIFIER — one function drives both the status pill and the row background,
+// so the two can never drift apart.
+// ============================================================================
+//
+// Returns { label, pill, bg } where:
+//   label  text shown on the status pill
+//   pill   Frappe indicator color name (green|red|orange|grey|blue)
+//   bg     CSS background color for the whole row
+//
+function _classify(doc) {
+    // 1. Locked (payroll-finalized) wins over everything — don't alarm on a paid row.
+    if (doc.locked) {
+        return { label: __('Locked'), pill: 'grey', bg: '#d3d3d3' };
+    }
+
+    // 2. Missing one punch — the "fix me" state. LIGHT RED.
+    var missing = doc.status === 'Missing Check-Out'
+        || ['missing_checkout', 'previous_month_carryover'].includes(doc.anomaly_reason);
+    if (missing) {
+        var mlabel = doc.status === 'Missing Check-Out' ? __('Missing Check-Out') : __('Unpaired');
+        return { label: mlabel, pill: 'red', bg: '#ffe0e0' };
+    }
+
+    // 3. Break-state punch — also a bad punch. LIGHT RED (distinct label).
+    if (doc.anomaly_reason === 'break_punch') {
+        return { label: __('Break Punch'), pill: 'red', bg: '#ffd6d6' };
+    }
+
+    // 4. Suspiciously long shift (> threshold) — ORANGE. Applies to Paired AND
+    //    Manual, matching the quality gate (status in Paired/Manual).
+    if ((doc.worked_seconds || 0) > LONG_SESSION_SECONDS) {
+        return {
+            label: __('> {0}h ⚠', [LONG_SESSION_HOURS]),
+            pill: 'orange',
+            bg: '#ffedcc',
+        };
+    }
+
+    // 5. Any remaining Anomaly with no more specific reason — treat as fix-me.
+    if (doc.status === 'Anomaly') {
+        return { label: __('Anomaly'), pill: 'red', bg: '#ffe0e0' };
+    }
+
+    // 6. Manual correction (and not long / not anomalous) — BLUE.
+    if (doc.manual_correction) {
+        return { label: __('Manual'), pill: 'blue', bg: '#e6eef9' };
+    }
+
+    // 7. Good pair — GREEN.
+    return { label: __('Paired'), pill: 'green', bg: '#e6f9ed' };
+}
 
 // ============================================================================
 // INDICATOR — status pill color on each row
 // ============================================================================
 
 frappe.listview_settings['KG Employee Attendance Shift'].get_indicator = function(doc) {
-    if (doc.locked) {
-        return [__('Locked'), 'grey', 'locked'];
-    }
-    if (doc.anomaly_reason === 'break_punch') {
-        return [__('Break punch'), 'red', 'anomaly'];
-    }
-    if (['missing_checkout', 'previous_month_carryover'].includes(doc.anomaly_reason)) {
-        var label = doc.status === 'Missing Check-Out'
-            ? __('Missing Check-Out')
-            : __('Unpaired');
-        return [label, 'orange', 'anomaly'];
-    }
-    if (doc.manual_correction) {
-        return [__('Manual'), 'blue', 'manual_correction'];
-    }
-    return [__('Paired'), 'green', 'ok'];
+    var c = _classify(doc);
+    return [c.label, c.pill, 'status,=,' + (doc.status || '')];
 };
 
 // ============================================================================
@@ -42,7 +97,25 @@ frappe.listview_settings['KG Employee Attendance Shift'].get_indicator = functio
 // ============================================================================
 
 frappe.listview_settings['KG Employee Attendance Shift'].refresh = function(listview) {
-    // Wait a beat for Frappe to finish rendering rows
+    // Load threshold from HR Settings (once per session) before rendering rows.
+    if (!_threshold_loaded) {
+        _threshold_loaded = true;
+        frappe.call({
+            method: 'frappe.client.get_value',
+            args: {
+                doctype: 'HR Settings',
+                fieldname: 'kreativ_long_session_hours',
+            },
+            callback: function(r) {
+                if (r.message && r.message.kreativ_long_session_hours) {
+                    LONG_SESSION_HOURS = r.message.kreativ_long_session_hours;
+                    LONG_SESSION_SECONDS = LONG_SESSION_HOURS * 3600;
+                }
+            }
+        });
+    }
+
+    // Wait a beat for Frappe to finish rendering rows.
     setTimeout(function() {
         listview.wrapper.find('.list-row').each(function() {
             var row = $(this);
@@ -51,20 +124,11 @@ frappe.listview_settings['KG Employee Attendance Shift'].refresh = function(list
 
             var doc = (listview.data || []).find(function(d) { return d.name === docname; }) || {};
 
-            // --- Row background coloring ---
-            if (doc.locked) {
-                row.css('background-color', '#d3d3d3');
-            } else if (doc.anomaly_reason === 'break_punch') {
-                row.css('background-color', '#ffe6e6');
-            } else if (doc.status === 'Anomaly' || doc.status === 'Missing Check-Out') {
-                row.css('background-color', '#fff4e6');
-            } else if (doc.manual_correction) {
-                row.css('background-color', '#e6eef9');
-            } else if (doc.status === 'Paired') {
-                row.css('background-color', '#e6f9ed');
-            }
+            // Row background from the same classifier the pill uses.
+            var c = _classify(doc);
+            row.css('background-color', c.bg);
 
-            // --- Clickable times → open the source Employee Checkin record ---
+            // Clickable times → open the source Employee Checkin record.
             make_time_open_checkin(row, 'check_in', doc.check_in_record);
             make_time_open_checkin(row, 'check_out', doc.check_out_record);
         });

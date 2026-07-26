@@ -134,6 +134,7 @@ custom_fields = {
 fixtures = [
     {"dt": "Client Script", "filters": [["module", "=", "Kreativ Attendance"]]},
     {"dt": "Workspace", "filters": [["module", "=", "Kreativ Attendance"]]},
+    {"dt": "Custom Field", "filters": [["dt", "=", "HR Settings"], ["fieldname", "=", "kreativ_long_session_hours"]]},
 ]
 
 # Install / Migrate hooks — auto-sync Scheduled Job Types from hooks.py
