@@ -50,6 +50,7 @@
     "permlevel": 0,
     "width": null,
     "columns": 0,
-    "doctype": "Custom Field"
+    "doctype": "Custom Field",
+    "name": "HR Settings-kreativ_long_session_hours"
   }
 ]

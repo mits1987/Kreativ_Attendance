@@ -1,0 +1,57 @@
+{
+	"actions": [],
+	"charts": [],
+	"content": "[{\"type\": \"card\", \"data\": {\"card_name\": \"Shift Recalculation\", \"label\": \"Shift Recalculation\", \"col\": 6, \"link\": \"List/KG Employee Attendance Shift\", \"icon\": \"refresh\", \"color\": \"#1f77b4\"}}, {\"type\": \"card\", \"data\": {\"card_name\": \"Monthly Shift Summary\", \"label\": \"Monthly Shift Summary\", \"col\": 6, \"link\": \"Report/KG Employee Shift Summary\", \"icon\": \"chart-bar\", \"color\": \"#ff7f0e\"}}, {\"type\": \"card\", \"data\": {\"card_name\": \"Shift Lock\", \"label\": \"Shift Lock\", \"col\": 6, \"link\": \"List/KG Employee Shift Lock\", \"icon\": \"lock\", \"color\": \"#d62728\"}}, {\"type\": \"card\", \"data\": {\"card_name\": \"Standard Hours\", \"label\": \"Standard Hours\", \"col\": 6, \"link\": \"List/KG Employee Standard Hours\", \"icon\": \"clock\", \"color\": \"#2ca02c\"}}]",
+	"creation": "2026-07-26 10:00:00.000000",
+	"custom_blocks": [],
+	"docstatus": 0,
+	"extenders": [],
+	"for_user": "",
+	"icon": "clock",
+	"idx": 0,
+	"indicator_color": "green",
+	"is_standard": 1,
+	"label": "Attendance KG",
+	"links": [],
+	"modified": "2026-07-26 10:00:00.000000",
+	"module": "Kreativ Attendance",
+	"name": "Attendance KG",
+	"number_cards": [],
+	"owner": "Administrator",
+	"parent_document_type": "",
+	"public": 1,
+	"quick_lists": [],
+	"restrict_to_domain": "",
+	"sequence_id": 1.0,
+	"shortcuts": [
+		{
+			"color": "Grey",
+			"doc_view": "List",
+			"label": "Employee Attendance Shifts",
+			"link_to": "KG Employee Attendance Shift",
+			"type": "DocType"
+		},
+		{
+			"color": "Grey",
+			"doc_view": "List",
+			"label": "Shift Locks",
+			"link_to": "KG Employee Shift Lock",
+			"type": "DocType"
+		},
+		{
+			"color": "Grey",
+			"doc_view": "List",
+			"label": "Standard Hours",
+			"link_to": "KG Employee Standard Hours",
+			"type": "DocType"
+		},
+		{
+			"color": "Grey",
+			"doc_view": "Report",
+			"label": "Monthly Shift Summary",
+			"link_to": "KG Employee Shift Summary",
+			"type": "DocType"
+		}
+	],
+	"title": "Attendance KG"
+}
