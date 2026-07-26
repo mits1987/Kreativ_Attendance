@@ -170,12 +170,8 @@ def delete_existing_shifts(year: int, month: int, employee: str = None,
     if exclude_employees:
         filters.append(["employee", "not in", list(exclude_employees)])
 
-    names = frappe.db.get_all(DOCTYPE, filters=filters, pluck="name")
-    if not names:
-        return 0
-    for n in names:
-        frappe.delete_doc(DOCTYPE, n, ignore_permissions=True)
-    return len(names)
+    count = frappe.db.delete(DOCTYPE, filters=filters)
+    return count
 
 
 def create_shift_record(employee, paired_shift) -> str:

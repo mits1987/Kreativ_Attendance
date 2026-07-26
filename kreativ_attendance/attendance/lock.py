@@ -120,7 +120,6 @@ def lock_period(employee, year, month, salary_slip, locked_by, reason="Salary Sl
             update_modified=False,
         )
 
-    frappe.db.commit()
     return doc
 
 
