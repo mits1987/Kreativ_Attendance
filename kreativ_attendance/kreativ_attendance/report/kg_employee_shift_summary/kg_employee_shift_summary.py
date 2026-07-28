@@ -19,8 +19,9 @@ WORKED_STATUSES = ("Paired", "Manual")
 
 def execute(filters=None):
     f = frappe._dict(filters or {})
-    year = int(f.year)
-    month = int(f.month)
+    today = frappe.utils.getdate()
+    year = int(f.year or today.year)
+    month = int(f.month or today.month)
     start = date(year, month, 1)
     end = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
 

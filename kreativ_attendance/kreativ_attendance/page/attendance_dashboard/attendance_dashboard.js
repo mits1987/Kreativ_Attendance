@@ -89,7 +89,7 @@ frappe.pages['attendance-dashboard'].on_page_load = function(wrapper) {
 		frappe.new_doc('Payroll Entry');
 	});
 	page.add_inner_button(__('Open Full Report'), function() {
-		frappe.set_route('query-report', 'Employee Shift Summary');
+		frappe.set_route('query-report', 'KG Employee Shift Summary');
 	});
 
 	page.add_inner_button(__('Check Issues'), function() {
@@ -159,7 +159,7 @@ frappe.pages['attendance-dashboard'].on_page_load = function(wrapper) {
 			start_date: ['between', [state.year + '-' + String(state.month).padStart(2, '0') + '-01', last_day]],
 		};
 		if (employee) frappe.route_options.employee = employee;
-		frappe.set_route('List', 'Employee Shift', 'List');
+		frappe.set_route('List', 'KG Employee Attendance Shift', 'List');
 	}
 
 	function load() {

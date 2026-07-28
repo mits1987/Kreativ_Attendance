@@ -16,6 +16,37 @@ import requests
 
 
 JWT_CACHE_KEY = "zkteco_jwt_token"
+ZKTECO_FAILURE_CACHE_KEY = "zkteco_failure_streak"
+MAX_FAILURES = 5
+
+
+def _check_circuit_breaker():
+    """Check if ZKTeco sync circuit breaker is tripped."""
+    streak = frappe.cache().get_value(ZKTECO_FAILURE_CACHE_KEY) or 0
+    return streak >= MAX_FAILURES
+
+
+def _increment_failure_streak():
+    """Increment failure streak in cache."""
+    current = frappe.cache().get_value(ZKTECO_FAILURE_CACHE_KEY) or 0
+    frappe.cache().set_value(ZKTECO_FAILURE_CACHE_KEY, current + 1, expires_in_sec=86400)
+
+
+def _reset_failure_streak():
+    """Reset failure streak on successful sync."""
+    frappe.cache().delete_value(ZKTECO_FAILURE_CACHE_KEY)
+
+
+def _disable_sync():
+    """Disable ZKTeco sync in config after circuit breaker trips."""
+    frappe.db.set_single_value("ZKTeco Config", "enable_sync", 0)
+    frappe.db.commit()
+    frappe.log_error(
+        f"ZKTeco sync disabled after {MAX_FAILURES} consecutive failures. "
+        f"Check connectivity to server {frappe.get_single('ZKTeco Config').server_ip}:{frappe.get_single('ZKTeco Config').server_port} "
+        f"and re-enable manually in ZKTeco Config.",
+        "ZKTeco Circuit Breaker"
+    )
 
 # punch_state -> ERPNext log_type. Direction is preserved even for Break /
 # Overtime states so pairing still works after HR confirms the intent.
@@ -295,6 +326,14 @@ def create_employee_checkin(transaction):
 
 def sync_zkteco_transactions():
     """Main sync — fetches punches from last_sync (with 6h overlap) and creates Employee Checkins."""
+    # Circuit breaker check
+    if _check_circuit_breaker():
+        frappe.log_error(
+            "ZKTeco sync skipped: circuit breaker open (too many consecutive failures)",
+            "ZKTeco Circuit Breaker"
+        )
+        return
+
     cfg = frappe.get_single("ZKTeco Config")
     if not cfg.enable_sync:
         return
@@ -312,6 +351,7 @@ def sync_zkteco_transactions():
 
         token_result = get_jwt_token()
         if not token_result or not token_result[0]:
+            _increment_failure_streak()
             frappe.log_error("Could not obtain JWT token for ZKTeco sync", "ZKTeco Sync")
             return
         token, token_type = token_result
@@ -346,10 +386,15 @@ def sync_zkteco_transactions():
             frappe.logger().info(
                 f"ZKTeco Sync completed: {new_count} new, {skip_count} skipped, {error_count} errors"
             )
+            _reset_failure_streak()
         else:
             frappe.logger().info("ZKTeco Sync: No transactions found in lookback window")
+            _reset_failure_streak()
 
     except Exception as e:
+        _increment_failure_streak()
+        if _check_circuit_breaker():
+            _disable_sync()
         frappe.log_error(f"ZKTeco sync failed: {str(e)}", "ZKTeco Sync Fatal Error")
 
 

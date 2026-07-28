@@ -117,12 +117,24 @@ frappe.listview_settings['KG Employee Attendance Shift'].refresh = function(list
 
     // Wait a beat for Frappe to finish rendering rows.
     setTimeout(function() {
+        console.log('KG ListView DEBUG:', {
+            has_data: listview.data !== undefined,
+            data_type: typeof listview.data,
+            is_array: Array.isArray(listview.data),
+            data_length: Array.isArray(listview.data) ? listview.data.length : 'N/A'
+        });
+        if (!Array.isArray(listview.data)) {
+            console.log('KG ListView: data not ready, skipping row processing');
+            return;
+        }
+        console.log('KG ListView: processing rows, data length:', listview.data.length);
         listview.wrapper.find('.list-row').each(function() {
             var row = $(this);
             var docname = row.attr('data-name');
             if (!docname) return;
 
-            var doc = (listview.data || []).find(function(d) { return d.name === docname; }) || {};
+            console.log('KG ListView: finding doc for:', docname, 'in data of length:', listview.data.length);
+            var doc = listview.data.find(function(d) { return d.name === docname; }) || {};
 
             // Row background from the same classifier the pill uses.
             var c = _classify(doc);
