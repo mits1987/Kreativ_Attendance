@@ -9,7 +9,7 @@ sync_month_to_hrms(year, month) does two things, both idempotent:
    same employee+date are skipped, so re-running is safe.
 
 2. Additional Salary — one submitted "Overtime" row per employee for the
-   month (amount = total OT hours x KG Employee Standard Hours.overtime_rate).
+   month (amount = total OT hours x Employee.overtime_rate_per_hour).
    Employees with no overtime or no rate are skipped and reported.
 
 After syncing, use a standard Payroll Entry -> Create Salary Slips.
@@ -109,10 +109,11 @@ def _create_overtime(shifts, period_end: date) -> dict:
         ot_totals[s.employee] = ot_totals.get(s.employee, 0) + (s.overtime_seconds or 0)
 
     rates = {
-        r["employee"]: r["overtime_rate"]
+        r["employee"]: r["overtime_rate_per_hour"]
         for r in frappe.get_all(
-            "KG Employee Standard Hours",
-            fields=["employee", "overtime_rate"],
+            "Employee",
+            filters={"overtime_rate_per_hour": [">", 0]},
+            fields=["name", "overtime_rate_per_hour"],
         )
     }
 

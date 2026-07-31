@@ -6,20 +6,20 @@ It scans a (year, month) period for every condition that historically caused
 over/under-payment in the old Excel + Python workflow:
 
     1. anomalies      — unpaired punches / missing checkouts (KG Employee Attendance Shift
-                        rows with status Anomaly or Missing Check-Out).
-                        previous_month_carryover is informational and does
-                        NOT block.
+                         rows with status Anomaly or Missing Check-Out).
+                         previous_month_carryover is informational and does
+                         NOT block.
     2. long_sessions  — paired shifts longer than the configured threshold
-                        (default 13h, same as the yellow rows in the old
-                        Excel report). A >13h "shift" is almost always a
-                        missed middle punch that merged two days.
+                         (default 13h, same as the yellow rows in the old
+                         Excel report). A >13h "shift" is almost always a
+                         missed middle punch that merged two days.
     3. break_punches  — raw device punches whose original ZKTeco punch_state
-                        was a Break/undefined state (stored in the
-                        punch_state_raw custom field by zkteco_sync). The old
-                        script hard-stopped on these; we surface them here.
+                         was a Break/undefined state (stored in the
+                         punch_state_raw custom field by zkteco_sync). The old
+                         script hard-stopped on these; we surface them here.
     4. missing_standard_hours — employees with shifts this month but no
-                        KG Employee Standard Hours row (silently falling back
-                        to the 8h default changes their overtime).
+                         Employee.working_hours row (silently falling back
+                         to the 8h default changes their overtime).
 
 `assert_month_clean()` throws with a readable, per-employee list — call it
 before any HRMS sync / payroll step. `get_month_issues()` returns the same
@@ -45,7 +45,6 @@ INFORMATIONAL_REASONS = ("previous_month_carryover",)
 DEFAULT_LONG_SESSION_HOURS = 13.0
 
 DOCTYPE = "KG Employee Attendance Shift"
-STANDARD_HOURS_DOCTYPE = "KG Employee Standard Hours"
 
 
 def _period(year: int, month: int):
@@ -141,10 +140,7 @@ def get_month_issues(year: int, month: int, employee: str = None) -> dict:
             (start, end, employee) if employee else (start, end),
         )
     )
-    try:
-        have_hours = set(frappe.get_all(STANDARD_HOURS_DOCTYPE, pluck="employee"))
-    except frappe.DoesNotExistError:
-        have_hours = set()
+    have_hours = set(frappe.get_all("Employee", filters={"working_hours": [">", 0]}, pluck="name"))
 
     # Also check Employee.default_shift -> Shift Type as valid standard hours source
     shift_fallback = set(_build_shift_hours_fallback_map().keys())
@@ -210,7 +206,7 @@ def format_issues(issues: dict) -> str:
 
     if issues["missing_standard_hours"]:
         lines.append(
-            "Employees using the 8h default (no Employee Standard Hours row): "
+            "Employees using the 8h default (no Employee.working_hours row): "
             + ", ".join(issues["missing_standard_hours"])
         )
     return "\n".join(lines) if lines else "No issues."

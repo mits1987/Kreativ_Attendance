@@ -19,29 +19,30 @@ DEFAULT_STANDARD_SECONDS = 8 * 3600
 
 DOCTYPE = "KG Employee Attendance Shift"
 LOCK_DOCTYPE = "KG Employee Shift Lock"
-STANDARD_HOURS_DOCTYPE = "KG Employee Standard Hours"
 
 
 def build_standard_hours_map() -> dict:
-    """Return {employee_doc_name: standard_seconds} from KG Employee Standard Hours.
+    """Return {employee_doc_name: standard_seconds} from Employee custom fields.
 
     Key is the Employee document name (HR-EMP-XXXXX), not the ZKTeco code,
     because the translation to codes happens at lookup time in recalculate_period.
 
+    Reads from Employee.working_hours and Employee.overtime_rate_per_hour custom fields.
     Falls back to Employee.default_shift -> Shift Type (start_time/end_time) if
-    KG Employee Standard Hours record doesn't exist.
+    no working_hours is set.
     """
-    # First, get explicit KG Employee Standard Hours records
+    # Get explicit working_hours from Employee custom field
     rows = frappe.db.get_all(
-        STANDARD_HOURS_DOCTYPE,
-        fields=["employee", "standard_hours"],
+        "Employee",
+        filters={"working_hours": [">", 0]},
+        fields=["name", "working_hours"],
     )
-    standard_map = {r["employee"]: seconds_from_hours(r["standard_hours"]) for r in rows}
+    standard_map = {r["name"]: seconds_from_hours(r["working_hours"]) for r in rows}
 
     # Build fallback map from Employee.default_shift -> Shift Type duration
     shift_map = _build_shift_hours_fallback_map()
 
-    # For employees without explicit standard hours, use shift fallback
+    # For employees without explicit working_hours, use shift fallback
     all_employees = set(standard_map.keys()) | set(shift_map.keys())
     for emp in all_employees:
         if emp not in standard_map and emp in shift_map:

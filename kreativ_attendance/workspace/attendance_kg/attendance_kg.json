@@ -1,7 +1,7 @@
 {
 	"actions": [],
 	"charts": [],
-	"content": "[{\"type\": \"card\", \"data\": {\"card_name\": \"Shift Recalculation\", \"label\": \"Shift Recalculation\", \"col\": 6, \"link\": \"List/KG Employee Attendance Shift\", \"icon\": \"refresh\", \"color\": \"#1f77b4\"}}, {\"type\": \"card\", \"data\": {\"card_name\": \"Monthly Shift Summary\", \"label\": \"Monthly Shift Summary\", \"col\": 6, \"link\": \"Report/KG Employee Shift Summary\", \"icon\": \"chart-bar\", \"color\": \"#ff7f0e\"}}, {\"type\": \"card\", \"data\": {\"card_name\": \"Shift Lock\", \"label\": \"Shift Lock\", \"col\": 6, \"link\": \"List/KG Employee Shift Lock\", \"icon\": \"lock\", \"color\": \"#d62728\"}}, {\"type\": \"card\", \"data\": {\"card_name\": \"Standard Hours\", \"label\": \"Standard Hours\", \"col\": 6, \"link\": \"List/KG Employee Standard Hours\", \"icon\": \"clock\", \"color\": \"#2ca02c\"}}]",
+	"content": "[{\"type\": \"card\", \"data\": {\"card_name\": \"Shift Recalculation\", \"label\": \"Shift Recalculation\", \"col\": 6, \"link\": \"List/KG Employee Attendance Shift\", \"icon\": \"refresh\", \"color\": \"#1f77b4\"}}, {\"type\": \"card\", \"data\": {\"card_name\": \"Monthly Shift Summary\", \"label\": \"Monthly Shift Summary\", \"col\": 6, \"link\": \"Report/KG Employee Shift Summary\", \"icon\": \"chart-bar\", \"color\": \"#ff7f0e\"}}, {\"type\": \"card\", \"data\": {\"card_name\": \"Shift Lock\", \"label\": \"Shift Lock\", \"col\": 6, \"link\": \"List/KG Employee Shift Lock\", \"icon\": \"lock\", \"color\": \"#d62728\"}}, {\"type\": \"card\", \"data\": {\"card_name\": \"Standard Hours\", \"label\": \"Standard Hours\", \"col\": 6, \"link\": \"List/Employee\", \"icon\": \"clock\", \"color\": \"#2ca02c\"}}]",
 	"creation": "2026-07-26 10:00:00.000000",
 	"custom_blocks": [],
 	"docstatus": 0,
@@ -41,8 +41,8 @@
 		{
 			"color": "Grey",
 			"doc_view": "List",
-			"label": "Standard Hours",
-			"link_to": "KG Employee Standard Hours",
+			"label": "Standard Hours (Employee)",
+			"link_to": "Employee",
 			"type": "DocType"
 		},
 		{
