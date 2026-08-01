@@ -35,8 +35,6 @@ from datetime import date
 import frappe
 from frappe import _
 
-from kreativ_attendance.attendance.service import _build_shift_hours_fallback_map
-
 # Blocking anomaly reasons. previous_month_carryover is informational only —
 # the old script printed it as a note and continued.
 BLOCKING_STATUSES = ("Anomaly", "Missing Check-Out")
@@ -54,15 +52,8 @@ def _period(year: int, month: int):
 
 
 def long_session_seconds() -> int:
-    """Read threshold from HR Settings (kreativ_long_session_hours) or site_config fallback."""
-    try:
-        hours = frappe.db.get_single_value("HR Settings", "kreativ_long_session_hours")
-    except Exception:
-        hours = None
-    if hours is None:
-        hours = frappe.conf.get("kreativ_long_session_hours")
-    hours = hours or DEFAULT_LONG_SESSION_HOURS
-    return int(float(hours) * 3600)
+    from kreativ_attendance.attendance import settings as kg_settings
+    return kg_settings.long_session_seconds()
 
 
 def get_month_issues(year: int, month: int, employee: str = None) -> dict:
@@ -142,13 +133,16 @@ def get_month_issues(year: int, month: int, employee: str = None) -> dict:
     )
     have_hours = set(frappe.get_all("Employee", filters={"working_hours": [">", 0]}, pluck="name"))
 
-    # Also check Employee.default_shift -> Shift Type as valid standard hours source
-    shift_fallback = set(_build_shift_hours_fallback_map().keys())
-    have_effective_hours = have_hours | shift_fallback
-    missing_standard_hours = sorted(emps_with_shifts - have_effective_hours)
+    missing_standard_hours = sorted(emps_with_shifts - have_hours)
 
-    block_long = bool(frappe.conf.get("kreativ_block_on_long_sessions", 1))
-    block_break = bool(frappe.conf.get("kreativ_block_on_break_punches", 1))
+    # A missing Holiday List means WD/WO/PH cannot be derived, so pay days will
+    # be wrong. This is as serious as a missing standard-hours value.
+    from kreativ_attendance.attendance.calendar_util import employees_without_holiday_list
+    missing_holiday_list = employees_without_holiday_list(emps_with_shifts)
+
+    from kreativ_attendance.attendance import settings as kg_settings
+    block_long = bool(int(kg_settings.get("block_on_long_sessions", 1) or 0))
+    block_break = bool(int(kg_settings.get("block_on_break_punches", 0) or 0))
 
     blocking = bool(
         anomalies
@@ -162,6 +156,7 @@ def get_month_issues(year: int, month: int, employee: str = None) -> dict:
         "long_sessions": long_sessions,
         "break_punches": break_punches,
         "missing_standard_hours": missing_standard_hours,
+        "missing_holiday_list": missing_holiday_list,
         "long_session_threshold_hours": threshold / 3600.0,
         "blocking": blocking,
     }
@@ -204,10 +199,15 @@ def format_issues(issues: dict) -> str:
         for b in issues["break_punches"][:30]:
             lines.append(f"  - {b['employee']} at {b['time']} (raw state {b['punch_state_raw']})")
 
-    if issues["missing_standard_hours"]:
+    if issues.get("missing_standard_hours"):
         lines.append(
             "Employees using the 8h default (no Employee.working_hours row): "
             + ", ".join(issues["missing_standard_hours"])
+        )
+    if issues.get("missing_holiday_list"):
+        lines.append(
+            "Employees with no Holiday List (WD/WO/PH cannot be derived): "
+            + ", ".join(issues["missing_holiday_list"])
         )
     return "\n".join(lines) if lines else "No issues."
 

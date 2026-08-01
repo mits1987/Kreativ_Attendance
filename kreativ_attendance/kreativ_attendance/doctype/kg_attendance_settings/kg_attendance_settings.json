@@ -1,0 +1,185 @@
+{
+  "actions": [],
+  "creation": "2026-07-31 10:00:00.000000",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "issingle": 1,
+  "module": "Kreativ Attendance",
+  "name": "KG Attendance Settings",
+  "owner": "Administrator",
+  "track_changes": 1,
+  "field_order": [
+    "mode_section",
+    "shadow_mode",
+    "shadow_mode_html",
+    "calc_section",
+    "default_standard_hours",
+    "ot_rate_base",
+    "column_break_calc",
+    "long_session_hours",
+    "block_on_long_sessions",
+    "block_on_break_punches",
+    "close_section",
+    "monthly_auto_close",
+    "close_day",
+    "close_hour",
+    "column_break_close",
+    "auto_create_payroll",
+    "auto_submit_payroll",
+    "notify_admin",
+    "admin_whatsapp",
+    "state_section",
+    "last_closed_period",
+    "last_close_status",
+    "last_close_at"
+  ],
+  "fields": [
+    {
+      "fieldname": "mode_section",
+      "fieldtype": "Section Break",
+      "label": "Operating Mode"
+    },
+    {
+      "fieldname": "shadow_mode",
+      "fieldtype": "Check",
+      "default": "1",
+      "label": "Shadow Mode (do not write to payroll)",
+      "description": "ON: recalculate shifts, run the quality gate, build the Monthly Attendance Summary and send alerts, but never create Attendance, Additional Salary or Payroll Entry. Use this while the old payroll system is still authoritative. Turn OFF only when this system becomes the system of record."
+    },
+    {
+      "fieldname": "shadow_mode_html",
+      "fieldtype": "HTML",
+      "options": "<div class='alert alert-warning' style='margin-top:8px'><b>Turning Shadow Mode off makes this system write real payroll documents.</b> Before doing so, reconcile at least one already-paid month using <code>bench --site &lt;site&gt; execute kreativ_attendance.attendance.reconcile.print_month --kwargs \"{'year':2026,'month':6}\"</code> and confirm every net figure matches.</div>"
+    },
+    {
+      "fieldname": "calc_section",
+      "fieldtype": "Section Break",
+      "label": "Calculation"
+    },
+    {
+      "fieldname": "default_standard_hours",
+      "fieldtype": "Float",
+      "default": "8",
+      "reqd": 1,
+      "precision": "2",
+      "label": "Default Standard Hours per Day",
+      "description": "Used only when an Employee has no Working Hours set. Employees relying on this default are reported by the quality gate."
+    },
+    {
+      "fieldname": "ot_rate_base",
+      "fieldtype": "Select",
+      "options": "Rate of Wages\nBasic Only",
+      "default": "Rate of Wages",
+      "reqd": 1,
+      "label": "Overtime Rate Base",
+      "description": "Rate of Wages = Basic + HRA + Conveyance + Medical + Other (column R of the salary sheet). The hourly rate is this figure divided by (Working Days x Standard Hours)."
+    },
+    {
+      "fieldname": "column_break_calc",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "long_session_hours",
+      "fieldtype": "Float",
+      "default": "13",
+      "precision": "2",
+      "label": "Long Session Alert (hours)",
+      "description": "Any single paired shift longer than this is flagged for manual review."
+    },
+    {
+      "fieldname": "block_on_long_sessions",
+      "fieldtype": "Check",
+      "default": "1",
+      "label": "Block Month Close on Long Sessions"
+    },
+    {
+      "fieldname": "block_on_break_punches",
+      "fieldtype": "Check",
+      "default": "0",
+      "label": "Block Month Close on Break Punches",
+      "description": "Break In / Break Out punches are not currently used. Leave off unless the devices start recording them."
+    },
+    {
+      "fieldname": "close_section",
+      "fieldtype": "Section Break",
+      "label": "Monthly Close"
+    },
+    {
+      "fieldname": "monthly_auto_close",
+      "fieldtype": "Check",
+      "default": "1",
+      "label": "Run Monthly Close Automatically"
+    },
+    {
+      "fieldname": "close_day",
+      "fieldtype": "Int",
+      "default": "2",
+      "label": "Close on Day of Month",
+      "description": "Day of the following month on which the close runs. Day 2 allows overnight shifts that started on the last day of the month to be punched out and synced."
+    },
+    {
+      "fieldname": "close_hour",
+      "fieldtype": "Int",
+      "default": "10",
+      "label": "Close at Hour (0-23)",
+      "description": "Server local time. The scheduler runs hourly and fires the close when day and hour match."
+    },
+    {
+      "fieldname": "column_break_close",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "auto_create_payroll",
+      "fieldtype": "Check",
+      "default": "0",
+      "label": "Create Draft Payroll Entry",
+      "description": "Ignored while Shadow Mode is on."
+    },
+    {
+      "fieldname": "auto_submit_payroll",
+      "fieldtype": "Check",
+      "default": "0",
+      "label": "Submit Payroll Entry Automatically",
+      "description": "DANGER: submitting generates Salary Slips without human review. Leave off unless you have reconciled several months."
+    },
+    {
+      "fieldname": "notify_admin",
+      "fieldtype": "Check",
+      "default": "1",
+      "label": "Send WhatsApp Alert on Close"
+    },
+    {
+      "fieldname": "admin_whatsapp",
+      "fieldtype": "Data",
+      "label": "Admin WhatsApp Number",
+      "description": "Digits with country code, e.g. 919876543210. Leave blank to use the notification platform default."
+    },
+    {
+      "fieldname": "state_section",
+      "fieldtype": "Section Break",
+      "label": "Last Run"
+    },
+    {
+      "fieldname": "last_closed_period",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "label": "Last Closed Period (YYYY-MM)"
+    },
+    {
+      "fieldname": "last_close_status",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "label": "Last Close Status"
+    },
+    {
+      "fieldname": "last_close_at",
+      "fieldtype": "Datetime",
+      "read_only": 1,
+      "label": "Last Close At"
+    }
+  ],
+  "permissions": [
+    {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1},
+    {"role": "HR Manager", "read": 1, "write": 1}
+  ]
+}

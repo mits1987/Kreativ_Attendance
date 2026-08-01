@@ -12,6 +12,10 @@ app_description = "Attendance and HR management for Kreativ Gravures"
 app_email = "info@kreativ.com"
 app_license = "MIT"
 
+override_doctype_class = {
+    "Salary Slip": "kreativ_attendance.attendance.salary_slip_override.KGSalarySlip"
+}
+
 # DocType list_js
 doctype_list_js = {
     "KG Employee Attendance Shift": "public/js/kg_employee_attendance_shift_list.js"
@@ -58,11 +62,10 @@ scheduler_events = {
         "*/5 * * * *": [
             "kreativ_attendance.attendance.zkteco_sync.scheduled_sync",
         ],
-        # 02:30 on the 1st of every month — close the previous month
-        "30 2 1 * *": [
-            "kreativ_attendance.attendance.monthly.monthly_close",
-        ],
     },
+    "hourly": [
+        "kreativ_attendance.attendance.monthly.scheduled_monthly_close",
+    ],
     "daily": [
         "kreativ_attendance.install.validate_scheduled_jobs",
     ],
@@ -146,4 +149,7 @@ patches = [
     "kreativ_attendance.patches.v16_0.add_openwa_settings_fields",
     "kreativ_attendance.patches.v16_0.add_punch_state_raw_field",
     "kreativ_attendance.patches.v16_0.add_openwa_webhook_fields",
+    "kreativ_attendance.patches.v16_0.create_attendance_settings",
+    "kreativ_attendance.patches.v16_0.retire_employee_standard_hours",
+    "kreativ_attendance.patches.v16_0.setup_payroll_structure",
 ]

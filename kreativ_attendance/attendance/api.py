@@ -107,10 +107,7 @@ def month_summary(year: int = None, month: int = None) -> dict:
     # Missing standard hours
     emps_with_shifts = set(emp_data.keys())
     have_hours = set(frappe.get_all("Employee", filters={"working_hours": [">", 0]}, pluck="name"))
-    from kreativ_attendance.attendance.service import _build_shift_hours_fallback_map
-    shift_fallback = set(_build_shift_hours_fallback_map().keys())
-    have_effective_hours = have_hours | shift_fallback
-    missing_standard_hours = sorted(emps_with_shifts - have_effective_hours)
+    missing_standard_hours = sorted(emps_with_shifts - have_hours)
 
     return {
         "totals": totals,

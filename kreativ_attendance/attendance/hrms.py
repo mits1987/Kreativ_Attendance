@@ -1,72 +1,126 @@
-"""Bridge from KG Employee Attendance Shift into standard HRMS doctypes.
+"""Bridge from Kreativ Attendance into standard HRMS doctypes.
 
-sync_month_to_hrms(year, month) does two things, both idempotent:
+REPLACES the previous version, which created one submitted Attendance per shift
+date plus an "Overtime" Additional Salary priced from Employee.overtime_rate_per_hour.
+That model did not match the approved payroll rule and has been removed:
 
-1. Attendance — one submitted record per employee per shift_date
-   (status Present, working_hours, in_time/out_time). This is what makes
-   HRMS payroll work: Salary Slip payment days, absence deduction and all
-   stock attendance reports key off Attendance. Existing records for the
-   same employee+date are skipped, so re-running is safe.
+  * overtime is no longer per-shift. Per-shift OT (`max(0, worked - standard)`)
+    discards short days while keeping long ones, which systematically OVERPAYS
+    when daily hours are uneven. OT is now a monthly residual:
+    `max(0, total_hours - WD * standard_hours)`.
+  * Employee.overtime_rate_per_hour is gone. The rate is derived:
+    `rate_of_wages / (WD * standard_hours)`, so it cannot drift out of step
+    with a salary revision.
 
-2. Additional Salary — one submitted "Overtime" row per employee for the
-   month (amount = total OT hours x Employee.overtime_rate_per_hour).
-   Employees with no overtime or no rate are skipped and reported.
+Two things are written here, both idempotent and both gated on Shadow Mode:
 
-After syncing, use a standard Payroll Entry -> Create Salary Slips.
+1. Attendance — one submitted record per employee per worked date. These exist
+   for compliance and reporting. They do NOT drive pay: payment days come from
+   the Monthly Attendance Summary via salary_slip_override.KGSalarySlip.
+
+2. Additional Salary — one "Overtime" row per employee per month, amount taken
+   straight from the reviewed summary.
+
+The Production Bonus (the "Incentive" column of the salary sheet) is NOT created
+here. It is a discretionary monthly figure decided by management and must be
+entered by HR as its own Additional Salary row.
 """
-from datetime import date, timedelta
-
 import frappe
+from frappe.utils import getdate
+
+from kreativ_attendance.attendance import settings as kg_settings
+from kreativ_attendance.attendance.calendar_util import period_bounds
+from kreativ_attendance.attendance.summary import SUMMARY_DOCTYPE
 
 OT_COMPONENT = "Overtime"
+WORKED_STATUSES = ("Paired", "Manual")
 
 
-def _period(year: int, month: int):
-    start = date(year, month, 1)
-    end = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
-    return start, end
+class ShadowModeError(Exception):
+    """Raised when a payroll write is attempted while Shadow Mode is on."""
 
 
 def sync_month_to_hrms(year: int, month: int, employee: str = None) -> dict:
-    start, end = _period(year, month)
+    """Write Attendance + Overtime for a period. Refuses in Shadow Mode."""
+    year, month = int(year), int(month)
+    period = f"{year}-{month:02d}"
 
-    filters = [
-        ["shift_date", ">=", start],
-        ["shift_date", "<", end],
-        ["status", "in", ["Paired", "Manual"]],
-    ]
-    if employee:
-        filters.append(["employee", "=", employee])
+    if kg_settings.is_shadow_mode():
+        return {
+            "period": period,
+            "skipped": True,
+            "message": (
+                "Shadow Mode is ON — no Attendance, Additional Salary or Payroll "
+                "Entry was created. Turn Shadow Mode off in KG Attendance Settings "
+                "once this system is the payroll system of record."
+            ),
+        }
 
-    shifts = frappe.get_all(
-        "KG Employee Attendance Shift",
-        filters=filters,
-        fields=["employee", "shift_date", "check_in", "check_out",
-                "worked_seconds", "overtime_seconds"],
-        order_by="employee, check_in",
-    )
-    if not shifts:
-        return {"period": f"{year}-{month:02d}", "message": "No paired shifts found for this period."}
+    summaries = _reviewed_summaries(year, month, employee)
+    if not summaries:
+        return {
+            "period": period,
+            "skipped": True,
+            "message": (
+                "No Reviewed summaries for this period. HR must review the KG "
+                "Monthly Attendance Summary rows before payroll can be written."
+            ),
+        }
 
-    att = _create_attendance(shifts)
-    ot = _create_overtime(shifts, end)
+    att = _create_attendance(year, month, employee)
+    ot = _create_overtime(summaries, year, month)
 
-    frappe.db.commit()
     return {
-        "period": f"{year}-{month:02d}",
+        "period": period,
+        "skipped": False,
+        "employees": len(summaries),
         "attendance_created": att["created"],
         "attendance_skipped_existing": att["skipped"],
         "attendance_errors": att["errors"],
         "overtime_created": ot["created"],
         "overtime_skipped_existing": ot["skipped"],
-        "overtime_no_rate": ot["no_rate"],
+        "overtime_zero": ot["zero"],
         "overtime_errors": ot["errors"],
     }
 
 
-def _create_attendance(shifts) -> dict:
-    # Aggregate per employee-day: several IN/OUT pairs on one date become one
-    # Attendance with summed hours, first IN and last OUT.
+def _reviewed_summaries(year, month, employee=None):
+    filters = {
+        "period_year": year,
+        "period_month": month,
+        "status": ["in", ["Reviewed", "Locked"]],
+    }
+    if employee:
+        filters["employee"] = employee
+    return frappe.get_all(
+        SUMMARY_DOCTYPE, filters=filters,
+        fields=["name", "employee", "ot_hours", "ot_amount", "pd", "pay_days"],
+        order_by="employee",
+    )
+
+
+def _create_attendance(year, month, employee=None) -> dict:
+    """One submitted Attendance per employee per worked date.
+
+    Several IN/OUT pairs on the same date collapse into one record with summed
+    hours, earliest IN and latest OUT. Status is Present: these records are a
+    factual log of attendance, not the basis of payment.
+    """
+    start, end = period_bounds(year, month)
+    filters = [
+        ["shift_date", ">=", start],
+        ["shift_date", "<", end],
+        ["status", "in", list(WORKED_STATUSES)],
+    ]
+    if employee:
+        filters.append(["employee", "=", employee])
+
+    shifts = frappe.get_all(
+        "KG Employee Attendance Shift", filters=filters,
+        fields=["employee", "shift_date", "check_in", "check_out", "worked_seconds"],
+        order_by="employee, check_in",
+    )
+
     by_day = {}
     for s in shifts:
         d = by_day.setdefault((s.employee, s.shift_date), {
@@ -95,6 +149,7 @@ def _create_attendance(shifts) -> dict:
                 "in_time": d["in"],
                 "out_time": d["out"],
             })
+            doc.flags.ignore_validate = False
             doc.insert(ignore_permissions=True)
             doc.submit()
             created += 1
@@ -103,33 +158,29 @@ def _create_attendance(shifts) -> dict:
     return {"created": created, "skipped": skipped, "errors": errors}
 
 
-def _create_overtime(shifts, period_end: date) -> dict:
-    ot_totals = {}
-    for s in shifts:
-        ot_totals[s.employee] = ot_totals.get(s.employee, 0) + (s.overtime_seconds or 0)
+def _create_overtime(summaries, year, month) -> dict:
+    """One submitted Overtime Additional Salary per employee per month."""
+    _, end = period_bounds(year, month)
+    payroll_date = frappe.utils.add_days(end, -1)
 
-    rates = {
-        r["employee"]: r["overtime_rate_per_hour"]
-        for r in frappe.get_all(
-            "Employee",
-            filters={"overtime_rate_per_hour": [">", 0]},
-            fields=["name", "overtime_rate_per_hour"],
-        )
-    }
+    if not frappe.db.exists("Salary Component", OT_COMPONENT):
+        return {
+            "created": 0, "skipped": 0, "zero": [],
+            "errors": [
+                f"Salary Component '{OT_COMPONENT}' does not exist. Create it once "
+                "as described in SALARY_STRUCTURE.md (type Earning, do not include "
+                "in the PF base, do include in the ESI base). No overtime was posted."
+            ],
+        }
 
-    payroll_date = period_end - timedelta(days=1)  # last day of month
-    _ensure_ot_component()
-
-    created, skipped, no_rate, errors = 0, 0, [], []
-    for emp, ot_seconds in sorted(ot_totals.items()):
-        if not ot_seconds:
-            continue
-        rate = rates.get(emp) or 0
-        if not rate:
-            no_rate.append(emp)
+    created, skipped, zero, errors = 0, 0, [], []
+    for s in summaries:
+        amount = float(s.get("ot_amount") or 0)
+        if amount <= 0:
+            zero.append(s["employee"])
             continue
         if frappe.db.exists("Additional Salary", {
-            "employee": emp,
+            "employee": s["employee"],
             "salary_component": OT_COMPONENT,
             "payroll_date": payroll_date,
             "docstatus": ["<", 2],
@@ -139,26 +190,18 @@ def _create_overtime(shifts, period_end: date) -> dict:
         try:
             doc = frappe.get_doc({
                 "doctype": "Additional Salary",
-                "employee": emp,
-                "company": frappe.db.get_value("Employee", emp, "company"),
+                "employee": s["employee"],
                 "salary_component": OT_COMPONENT,
+                "amount": amount,
                 "payroll_date": payroll_date,
-                "amount": round(ot_seconds / 3600.0 * rate, 2),
                 "overwrite_salary_structure_amount": 0,
+                "company": frappe.db.get_value("Employee", s["employee"], "company"),
+                "ref_doctype": SUMMARY_DOCTYPE,
+                "ref_docname": s["name"],
             })
             doc.insert(ignore_permissions=True)
             doc.submit()
             created += 1
         except Exception as e:
-            errors.append(f"{emp}: {e}")
-    return {"created": created, "skipped": skipped, "no_rate": no_rate, "errors": errors}
-
-
-def _ensure_ot_component():
-    if not frappe.db.exists("Salary Component", OT_COMPONENT):
-        frappe.get_doc({
-            "doctype": "Salary Component",
-            "salary_component": OT_COMPONENT,
-            "salary_component_abbr": "OT",
-            "type": "Earning",
-        }).insert(ignore_permissions=True)
+            errors.append(f"{s['employee']}: {e}")
+    return {"created": created, "skipped": skipped, "zero": zero, "errors": errors}

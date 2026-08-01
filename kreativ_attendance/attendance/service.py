@@ -15,86 +15,34 @@ from kreativ_attendance.attendance.pairing import (
     seconds_from_hours,
 )
 
-DEFAULT_STANDARD_SECONDS = 8 * 3600
+
+def _default_standard_seconds() -> int:
+    """The 8h default now lives in KG Attendance Settings, not in code."""
+    from kreativ_attendance.attendance import settings as kg_settings
+    return int(kg_settings.default_standard_hours() * 3600)
+
 
 DOCTYPE = "KG Employee Attendance Shift"
 LOCK_DOCTYPE = "KG Employee Shift Lock"
 
 
 def build_standard_hours_map() -> dict:
-    """Return {employee_doc_name: standard_seconds} from Employee custom fields.
+    """Return {employee_doc_name: standard_seconds} from Employee.working_hours.
 
-    Key is the Employee document name (HR-EMP-XXXXX), not the ZKTeco code,
-    because the translation to codes happens at lookup time in recalculate_period.
-
-    Reads from Employee.working_hours and Employee.overtime_rate_per_hour custom fields.
-    Falls back to Employee.default_shift -> Shift Type (start_time/end_time) if
-    no working_hours is set.
+    Single source of truth. Employees with no value fall back to the settings
+    default and are reported by the quality gate, so the fallback is visible
+    rather than silent.
     """
-    # Get explicit working_hours from Employee custom field
     rows = frappe.db.get_all(
         "Employee",
         filters={"working_hours": [">", 0]},
         fields=["name", "working_hours"],
     )
-    standard_map = {r["name"]: seconds_from_hours(r["working_hours"]) for r in rows}
-
-    # Build fallback map from Employee.default_shift -> Shift Type duration
-    shift_map = _build_shift_hours_fallback_map()
-
-    # For employees without explicit working_hours, use shift fallback
-    all_employees = set(standard_map.keys()) | set(shift_map.keys())
-    for emp in all_employees:
-        if emp not in standard_map and emp in shift_map:
-            standard_map[emp] = shift_map[emp]
-
-    return standard_map
-
-
-def _build_shift_hours_fallback_map() -> dict:
-    """Return {employee: standard_seconds} from Employee.default_shift -> Shift Type."""
-    # Get employees with default_shift set
-    emp_shifts = frappe.db.get_all(
-        "Employee",
-        filters={"default_shift": ["!=", ""]},
-        fields=["name", "default_shift"],
-    )
-    if not emp_shifts:
-        return {}
-
-    shift_names = list({e["default_shift"] for e in emp_shifts})
-    # Get shift type start/end times
-    shift_types = frappe.get_all(
-        "Shift Type",
-        filters={"name": ["in", shift_names]},
-        fields=["name", "start_time", "end_time"],
-    )
-    shift_hours = {}
-    for st in shift_types:
-        start = st.get("start_time") or 0
-        end = st.get("end_time") or 0
-        # Time fields return timedelta; convert to seconds
-        if hasattr(start, "total_seconds"):
-            start = int(start.total_seconds())
-        if hasattr(end, "total_seconds"):
-            end = int(end.total_seconds())
-        if end > start:
-            shift_hours[st["name"]] = int(end - start)
-        else:
-            shift_hours[st["name"]] = DEFAULT_STANDARD_SECONDS
-
-    # Map employee -> shift standard seconds
-    emp_map = {}
-    for e in emp_shifts:
-        shift_name = e["default_shift"]
-        if shift_name in shift_hours:
-            emp_map[e["name"]] = shift_hours[shift_name]
-    return emp_map
+    return {r["name"]: seconds_from_hours(r["working_hours"]) for r in rows}
 
 
 def default_standard_seconds(standard_map: dict, employee: str) -> int:
-    """Return per-employee standard, or 8h default if not set."""
-    return standard_map.get(employee) or DEFAULT_STANDARD_SECONDS
+    return standard_map.get(employee) or _default_standard_seconds()
 
 
 def fetch_checkins_for_period(start: datetime, end: datetime, employee: str = None) -> dict:
@@ -110,12 +58,24 @@ def fetch_checkins_for_period(start: datetime, end: datetime, employee: str = No
         order_by="employee, time",
     )
 
-    # Add helper field for raw type detection (the device_id encodes original punch state).
-    # In real data, 'device_id' looks like "Auto add (ZKTeco-26897)" — original "Break"
-    # punches have it preserved in device_id text per the user's script.
+    # Single source of truth for break detection: punch_state_raw, which is what
+    # zkteco_sync writes. The previous device_id string-sniffing disagreed with
+    # quality.py and would have caused inconsistent behaviour the day break
+    # punches are switched on.
+    has_raw = frappe.db.has_column("Employee Checkin", "punch_state_raw")
+    raw_map = {}
+    if has_raw and records:
+        for row in frappe.get_all(
+            "Employee Checkin",
+            filters=[["name", "in", [r["name"] for r in records]]],
+            fields=["name", "punch_state_raw"],
+        ):
+            raw_map[row["name"]] = str(row.get("punch_state_raw") or "")
+
+    BREAK_STATES = {"2", "3", "BREAK"}
     for r in records:
-        dev = r.get("device_id") or ""
-        if "BREAK" in dev.upper():
+        state = raw_map.get(r["name"], "")
+        if state.upper() in BREAK_STATES:
             r["_raw_log_type"] = "Break In" if r["log_type"] == "IN" else "Break Out"
         else:
             r["_raw_log_type"] = ""
@@ -187,7 +147,8 @@ def create_shift_record(employee, paired_shift) -> str:
         "overtime_hours": format_hhmm(paired_shift["overtime_seconds"]),
         "worked_seconds": paired_shift["total_seconds"],
         "overtime_seconds": paired_shift["overtime_seconds"],
-        "standard_hours": paired_shift.get("standard_hours", 8.0),
+        "standard_hours": paired_shift.get("standard_hours")
+                          or (_default_standard_seconds() / 3600.0),
         "check_in_record": paired_shift.get("check_in_name"),
         "check_out_record": paired_shift.get("check_out_name"),
         "status": "Paired" if paired_shift.get("check_out_time") else "Missing Check-Out",
@@ -309,7 +270,7 @@ def recalculate_period(year: int, month: int, employee: str = None) -> dict:
                 "check_out": a["time"] if a.get("log_type") == "OUT" else None,
                 "worked_hours": "",
                 "overtime_hours": "",
-                "standard_hours": standard / 3600.0 if standard else 8,
+                "standard_hours": standard / 3600.0 if standard else (_default_standard_seconds() / 3600.0),
                 "status": "Anomaly",
                 "anomaly_reason": _map_anomaly_reason(a.get("reason", "")),
                 "check_in_record": a.get("checkin_name") if a.get("log_type") == "IN" else None,
