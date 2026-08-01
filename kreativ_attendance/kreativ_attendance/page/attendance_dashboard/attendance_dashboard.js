@@ -91,6 +91,81 @@ frappe.pages['attendance-dashboard'].on_page_load = function(wrapper) {
 	page.add_inner_button(__('Open Full Report'), function() {
 		frappe.set_route('query-report', 'KG Employee Shift Summary');
 	});
+	page.add_inner_button(__('Preview Payroll'), function() {
+		frappe.call({
+			method: 'kreativ_attendance.attendance.api.preview_payroll',
+			args: { year: state.year, month: state.month },
+			freeze: true,
+			freeze_message: __('Computing payroll preview...'),
+			callback: function(r) {
+				var data = r.message || {};
+				var rows = data.rows || [];
+				var tot = data.totals || {};
+				if (!rows.length) {
+					frappe.msgprint({ title: __('Preview Payroll'), message: __('No summary data for {0}. Run Recalculate first.', [period_label()]), indicator: 'orange' });
+					return;
+				}
+				var html = '<div style="max-height:500px; overflow-y:auto;">'
+					+ '<table class="table table-bordered table-striped" style="font-size:12px; margin:0;">'
+					+ '<thead><tr>'
+					+ '<th>' + __('ID') + '</th>'
+					+ '<th>' + __('Name') + '</th>'
+					+ '<th style="text-align:right">' + __('PD') + '</th>'
+					+ '<th style="text-align:right">' + __('Pay Days') + '</th>'
+					+ '<th style="text-align:right">' + __('Basic') + '</th>'
+					+ '<th style="text-align:right">' + __('HRA') + '</th>'
+					+ '<th style="text-align:right">' + __('Con') + '</th>'
+					+ '<th style="text-align:right">' + __('Med') + '</th>'
+					+ '<th style="text-align:right">' + __('Other') + '</th>'
+					+ '<th style="text-align:right">' + __('OT Amt') + '</th>'
+					+ '<th style="text-align:right">' + __('Gross') + '</th>'
+					+ '<th style="text-align:right">' + __('PF') + '</th>'
+					+ '<th style="text-align:right">' + __('ESI') + '</th>'
+					+ '<th style="text-align:right">' + __('PT') + '</th>'
+					+ '<th style="text-align:right">' + __('LWF') + '</th>'
+					+ '<th style="text-align:right">' + __('Total Ded') + '</th>'
+					+ '<th style="text-align:right; font-weight:700;">' + __('Net') + '</th>'
+					+ '</tr></thead><tbody>';
+				rows.forEach(function(r) {
+					html += '<tr>'
+						+ '<td>' + frappe.utils.escape_html(r.salary_sheet_id || r.employee) + '</td>'
+						+ '<td>' + frappe.utils.escape_html(r.employee_name || '') + '</td>'
+						+ '<td style="text-align:right">' + (r.pd || 0) + '</td>'
+						+ '<td style="text-align:right">' + (r.pay_days || 0) + '</td>'
+						+ '<td style="text-align:right">' + frappe.format(r.basic_payable, {fieldtype:'Currency'}) + '</td>'
+						+ '<td style="text-align:right">' + frappe.format(r.hra_payable, {fieldtype:'Currency'}) + '</td>'
+						+ '<td style="text-align:right">' + frappe.format(r.con_payable, {fieldtype:'Currency'}) + '</td>'
+						+ '<td style="text-align:right">' + frappe.format(r.med_payable, {fieldtype:'Currency'}) + '</td>'
+						+ '<td style="text-align:right">' + frappe.format(r.other_payable, {fieldtype:'Currency'}) + '</td>'
+						+ '<td style="text-align:right">' + frappe.format(r.overtime, {fieldtype:'Currency'}) + '</td>'
+						+ '<td style="text-align:right; font-weight:600;">' + frappe.format(r.gross, {fieldtype:'Currency'}) + '</td>'
+						+ '<td style="text-align:right">' + (r.pf ? frappe.format(r.pf, {fieldtype:'Currency'}) : '-') + '</td>'
+						+ '<td style="text-align:right">' + (r.esi ? frappe.format(r.esi, {fieldtype:'Currency'}) : '-') + '</td>'
+						+ '<td style="text-align:right">' + (r.pt ? frappe.format(r.pt, {fieldtype:'Currency'}) : '-') + '</td>'
+						+ '<td style="text-align:right">' + (r.lwf ? frappe.format(r.lwf, {fieldtype:'Currency'}) : '-') + '</td>'
+						+ '<td style="text-align:right">' + frappe.format(r.total_deduction, {fieldtype:'Currency'}) + '</td>'
+						+ '<td style="text-align:right; font-weight:700;">' + frappe.format(r.net, {fieldtype:'Currency'}) + '</td>'
+						+ '</tr>';
+				});
+				html += '</tbody><tfoot><tr style="font-weight:700; background:#f0f0f0;">'
+					+ '<td colspan="10">' + __('Total') + ' (' + tot.employees + ' ' + __('employees') + ')</td>'
+					+ '<td style="text-align:right">' + frappe.format(tot.ot_amount, {fieldtype:'Currency'}) + '</td>'
+					+ '<td style="text-align:right">' + frappe.format(tot.gross, {fieldtype:'Currency'}) + '</td>'
+					+ '<td style="text-align:right">' + frappe.format(tot.pf, {fieldtype:'Currency'}) + '</td>'
+					+ '<td style="text-align:right">' + frappe.format(tot.esi, {fieldtype:'Currency'}) + '</td>'
+					+ '<td style="text-align:right">-</td>'
+					+ '<td style="text-align:right">-</td>'
+					+ '<td style="text-align:right">' + frappe.format(tot.total_deduction, {fieldtype:'Currency'}) + '</td>'
+					+ '<td style="text-align:right">' + frappe.format(tot.net, {fieldtype:'Currency'}) + '</td>'
+					+ '</tr></tfoot></table></div>';
+				frappe.msgprint({
+					title: __('Payroll Preview — {0} ({1} employees)', [period_label(), tot.employees]),
+					indicator: 'blue',
+					message: html,
+				});
+			}
+		});
+	});
 
 	page.add_inner_button(__('Check Issues'), function() {
 		frappe.call({

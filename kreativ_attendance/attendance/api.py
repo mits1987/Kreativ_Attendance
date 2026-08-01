@@ -211,6 +211,86 @@ def unlock_period(emp: str = None, year: int = None, month: int = None, reason: 
 
 
 @frappe.whitelist()
+def preview_payroll(year: int = None, month: int = None) -> dict:
+    """Dry-run payroll computation for a month — no records written.
+
+    Returns per-employee salary breakdown using KG Monthly Attendance Summary
+    data + Employee custom fields (kg_basic, etc.) + payroll_math.compute_salary().
+    """
+    frappe.only_for(ALLOWED_ROLES)
+    if not year or not month:
+        frappe.throw(_("Both year and month are required"))
+    year, month = int(year), int(month)
+
+    from calendar import monthrange
+    from kreativ_attendance.attendance.payroll_math import compute_salary
+
+    days_in_month = monthrange(year, month)[1]
+
+    summaries = frappe.get_all(
+        "KG Monthly Attendance Summary",
+        filters={"period_year": year, "period_month": month},
+        fields=["employee", "employee_name", "pd", "wo", "ph", "pay_days",
+                "ot_hours", "ot_amount", "standard_hours", "total_hours",
+                "wd", "rate_of_wages", "anomaly_count"],
+        order_by="employee",
+    )
+    if not summaries:
+        return {"rows": [], "totals": {}}
+
+    emp_ids = [s.employee for s in summaries]
+    emps = frappe.get_all(
+        "Employee",
+        filters={"name": ["in", emp_ids]},
+        fields=["name", "employee_name", "salary_sheet_id",
+                "kg_basic", "kg_hra", "kg_conveyance", "kg_medical", "kg_other",
+                "pf_applicable", "esi_applicable"],
+    )
+    emp_map = {e.name: e for e in emps}
+
+    rows = []
+    for s in summaries:
+        e = emp_map.get(s.employee, {})
+        result = compute_salary(
+            basic=e.get("kg_basic") or 0,
+            hra=e.get("kg_hra") or 0,
+            con=e.get("kg_conveyance") or 0,
+            med=e.get("kg_medical") or 0,
+            other=e.get("kg_other") or 0,
+            pd=s.pd or 0,
+            wo=s.wo or 0,
+            ph=s.ph or 0,
+            days_in_month=days_in_month,
+            incentive=0,
+            overtime=s.ot_amount or 0,
+            pf_applicable=bool(e.get("pf_applicable")),
+            esi_applicable=bool(e.get("esi_applicable")),
+        )
+        result["employee"] = s.employee
+        result["employee_name"] = s.employee_name
+        result["salary_sheet_id"] = e.get("salary_sheet_id") or ""
+        result["pd"] = s.pd
+        result["wo"] = s.wo
+        result["ph"] = s.ph
+        result["total_hours"] = s.total_hours
+        result["ot_hours"] = s.ot_hours
+        result["anomaly_count"] = s.anomaly_count or 0
+        rows.append(result)
+
+    totals = {
+        "gross": sum(r["gross"] for r in rows),
+        "total_deduction": sum(r["total_deduction"] for r in rows),
+        "net": sum(r["net"] for r in rows),
+        "ot_amount": sum(r["overtime"] for r in rows),
+        "pf": sum(r["pf"] for r in rows),
+        "esi": sum(r["esi"] for r in rows),
+        "employees": len(rows),
+    }
+
+    return {"rows": rows, "totals": totals, "days_in_month": days_in_month}
+
+
+@frappe.whitelist()
 def sync_month_to_hrms(year: int = None, month: int = None, employee: str = None) -> dict:
     """Create HRMS Attendance records + Overtime Additional Salary for a month.
 
