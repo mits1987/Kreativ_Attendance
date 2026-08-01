@@ -105,64 +105,69 @@ frappe.pages['attendance-dashboard'].on_page_load = function(wrapper) {
 					frappe.msgprint({ title: __('Preview Payroll'), message: __('No summary data for {0}. Run Recalculate first.', [period_label()]), indicator: 'orange' });
 					return;
 				}
-				var html = '<div style="max-height:500px; overflow-y:auto;">'
-					+ '<table class="table table-bordered table-striped" style="font-size:12px; margin:0;">'
+				var html = '<div style="max-height:500px; overflow:auto;">'
+					+ '<table class="table table-bordered table-striped" style="font-size:13px; margin:0; white-space:nowrap;">'
 					+ '<thead><tr>'
-					+ '<th>' + __('ID') + '</th>'
-					+ '<th>' + __('Name') + '</th>'
-					+ '<th style="text-align:right">' + __('PD') + '</th>'
-					+ '<th style="text-align:right">' + __('Pay Days') + '</th>'
-					+ '<th style="text-align:right">' + __('Basic') + '</th>'
-					+ '<th style="text-align:right">' + __('HRA') + '</th>'
-					+ '<th style="text-align:right">' + __('Con') + '</th>'
-					+ '<th style="text-align:right">' + __('Med') + '</th>'
-					+ '<th style="text-align:right">' + __('Other') + '</th>'
-					+ '<th style="text-align:right">' + __('OT Amt') + '</th>'
-					+ '<th style="text-align:right">' + __('Gross') + '</th>'
-					+ '<th style="text-align:right">' + __('PF') + '</th>'
-					+ '<th style="text-align:right">' + __('ESI') + '</th>'
-					+ '<th style="text-align:right">' + __('PT') + '</th>'
-					+ '<th style="text-align:right">' + __('LWF') + '</th>'
-					+ '<th style="text-align:right">' + __('Total Ded') + '</th>'
-					+ '<th style="text-align:right; font-weight:700;">' + __('Net') + '</th>'
+					+ '<th style="padding:8px 12px; min-width:70px;">' + __('ID') + '</th>'
+					+ '<th style="padding:8px 12px; min-width:180px;">' + __('Name') + '</th>'
+					+ '<th style="padding:8px 12px; text-align:right; min-width:55px;">' + __('PD') + '</th>'
+					+ '<th style="padding:8px 12px; text-align:right; min-width:70px;">' + __('Pay Days') + '</th>'
+					+ '<th style="padding:8px 12px; text-align:right; min-width:100px;">' + __('Basic') + '</th>'
+					+ '<th style="padding:8px 12px; text-align:right; min-width:90px;">' + __('HRA') + '</th>'
+					+ '<th style="padding:8px 12px; text-align:right; min-width:90px;">' + __('Con') + '</th>'
+					+ '<th style="padding:8px 12px; text-align:right; min-width:90px;">' + __('Med') + '</th>'
+					+ '<th style="padding:8px 12px; text-align:right; min-width:90px;">' + __('Other') + '</th>'
+					+ '<th style="padding:8px 12px; text-align:right; min-width:90px;">' + __('OT Amt') + '</th>'
+					+ '<th style="padding:8px 12px; text-align:right; min-width:100px;">' + __('Gross') + '</th>'
+					+ '<th style="padding:8px 12px; text-align:right; min-width:80px;">' + __('PF') + '</th>'
+					+ '<th style="padding:8px 12px; text-align:right; min-width:80px;">' + __('ESI') + '</th>'
+					+ '<th style="padding:8px 12px; text-align:right; min-width:70px;">' + __('PT') + '</th>'
+					+ '<th style="padding:8px 12px; text-align:right; min-width:70px;">' + __('LWF') + '</th>'
+					+ '<th style="padding:8px 12px; text-align:right; min-width:100px;">' + __('Total Ded') + '</th>'
+					+ '<th style="padding:8px 12px; text-align:right; font-weight:700; min-width:110px;">' + __('Net') + '</th>'
 					+ '</tr></thead><tbody>';
 				rows.forEach(function(r) {
 					html += '<tr>'
-						+ '<td>' + frappe.utils.escape_html(r.salary_sheet_id || r.employee) + '</td>'
-						+ '<td>' + frappe.utils.escape_html(r.employee_name || '') + '</td>'
-						+ '<td style="text-align:right">' + (r.pd || 0) + '</td>'
-						+ '<td style="text-align:right">' + (r.pay_days || 0) + '</td>'
-						+ '<td style="text-align:right">' + frappe.format(r.basic_payable, {fieldtype:'Currency'}) + '</td>'
-						+ '<td style="text-align:right">' + frappe.format(r.hra_payable, {fieldtype:'Currency'}) + '</td>'
-						+ '<td style="text-align:right">' + frappe.format(r.con_payable, {fieldtype:'Currency'}) + '</td>'
-						+ '<td style="text-align:right">' + frappe.format(r.med_payable, {fieldtype:'Currency'}) + '</td>'
-						+ '<td style="text-align:right">' + frappe.format(r.other_payable, {fieldtype:'Currency'}) + '</td>'
-						+ '<td style="text-align:right">' + frappe.format(r.overtime, {fieldtype:'Currency'}) + '</td>'
-						+ '<td style="text-align:right; font-weight:600;">' + frappe.format(r.gross, {fieldtype:'Currency'}) + '</td>'
-						+ '<td style="text-align:right">' + (r.pf ? frappe.format(r.pf, {fieldtype:'Currency'}) : '-') + '</td>'
-						+ '<td style="text-align:right">' + (r.esi ? frappe.format(r.esi, {fieldtype:'Currency'}) : '-') + '</td>'
-						+ '<td style="text-align:right">' + (r.pt ? frappe.format(r.pt, {fieldtype:'Currency'}) : '-') + '</td>'
-						+ '<td style="text-align:right">' + (r.lwf ? frappe.format(r.lwf, {fieldtype:'Currency'}) : '-') + '</td>'
-						+ '<td style="text-align:right">' + frappe.format(r.total_deduction, {fieldtype:'Currency'}) + '</td>'
-						+ '<td style="text-align:right; font-weight:700;">' + frappe.format(r.net, {fieldtype:'Currency'}) + '</td>'
+						+ '<td style="padding:8px 12px;">' + frappe.utils.escape_html(r.salary_sheet_id || r.employee) + '</td>'
+						+ '<td style="padding:8px 12px;">' + frappe.utils.escape_html(r.employee_name || '') + '</td>'
+						+ '<td style="padding:8px 12px; text-align:right;">' + (r.pd || 0) + '</td>'
+						+ '<td style="padding:8px 12px; text-align:right;">' + (r.pay_days || 0) + '</td>'
+						+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(r.basic_payable, {fieldtype:'Currency'}) + '</td>'
+						+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(r.hra_payable, {fieldtype:'Currency'}) + '</td>'
+						+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(r.con_payable, {fieldtype:'Currency'}) + '</td>'
+						+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(r.med_payable, {fieldtype:'Currency'}) + '</td>'
+						+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(r.other_payable, {fieldtype:'Currency'}) + '</td>'
+						+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(r.overtime, {fieldtype:'Currency'}) + '</td>'
+						+ '<td style="padding:8px 12px; text-align:right; font-weight:600;">' + frappe.format(r.gross, {fieldtype:'Currency'}) + '</td>'
+						+ '<td style="padding:8px 12px; text-align:right;">' + (r.pf ? frappe.format(r.pf, {fieldtype:'Currency'}) : '-') + '</td>'
+						+ '<td style="padding:8px 12px; text-align:right;">' + (r.esi ? frappe.format(r.esi, {fieldtype:'Currency'}) : '-') + '</td>'
+						+ '<td style="padding:8px 12px; text-align:right;">' + (r.pt ? frappe.format(r.pt, {fieldtype:'Currency'}) : '-') + '</td>'
+						+ '<td style="padding:8px 12px; text-align:right;">' + (r.lwf ? frappe.format(r.lwf, {fieldtype:'Currency'}) : '-') + '</td>'
+						+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(r.total_deduction, {fieldtype:'Currency'}) + '</td>'
+						+ '<td style="padding:8px 12px; text-align:right; font-weight:700;">' + frappe.format(r.net, {fieldtype:'Currency'}) + '</td>'
 						+ '</tr>';
 				});
 				html += '</tbody><tfoot><tr style="font-weight:700; background:#f0f0f0;">'
-					+ '<td colspan="10">' + __('Total') + ' (' + tot.employees + ' ' + __('employees') + ')</td>'
-					+ '<td style="text-align:right">' + frappe.format(tot.ot_amount, {fieldtype:'Currency'}) + '</td>'
-					+ '<td style="text-align:right">' + frappe.format(tot.gross, {fieldtype:'Currency'}) + '</td>'
-					+ '<td style="text-align:right">' + frappe.format(tot.pf, {fieldtype:'Currency'}) + '</td>'
-					+ '<td style="text-align:right">' + frappe.format(tot.esi, {fieldtype:'Currency'}) + '</td>'
-					+ '<td style="text-align:right">-</td>'
-					+ '<td style="text-align:right">-</td>'
-					+ '<td style="text-align:right">' + frappe.format(tot.total_deduction, {fieldtype:'Currency'}) + '</td>'
-					+ '<td style="text-align:right">' + frappe.format(tot.net, {fieldtype:'Currency'}) + '</td>'
+					+ '<td style="padding:8px 12px;" colspan="10">' + __('Total') + ' (' + tot.employees + ' ' + __('employees') + ')</td>'
+					+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(tot.ot_amount, {fieldtype:'Currency'}) + '</td>'
+					+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(tot.gross, {fieldtype:'Currency'}) + '</td>'
+					+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(tot.pf, {fieldtype:'Currency'}) + '</td>'
+					+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(tot.esi, {fieldtype:'Currency'}) + '</td>'
+					+ '<td style="padding:8px 12px; text-align:right;">-</td>'
+					+ '<td style="padding:8px 12px; text-align:right;">-</td>'
+					+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(tot.total_deduction, {fieldtype:'Currency'}) + '</td>'
+					+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(tot.net, {fieldtype:'Currency'}) + '</td>'
 					+ '</tr></tfoot></table></div>';
-				frappe.msgprint({
+				var d = new frappe.ui.Dialog({
 					title: __('Payroll Preview — {0} ({1} employees)', [period_label(), tot.employees]),
 					indicator: 'blue',
-					message: html,
+					size: 'extra-large',
+					fields: [{ fieldtype: 'HTML', fieldname: 'preview_table', options: html }],
+					primary_action_label: __('Close'),
+					primary_action: function() { d.hide(); },
 				});
+				d.show();
+				d.$wrapper.find('.modal-dialog').css('max-width', '1400px');
 			}
 		});
 	});
