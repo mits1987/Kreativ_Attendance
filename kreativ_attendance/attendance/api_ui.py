@@ -336,3 +336,101 @@ def verified_long_sessions(year: int = None, month: int = None) -> list:
     for r in rows:
         r["hours"] = round(float(r.get("worked_seconds") or 0) / 3600.0, 2)
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Daily check-in view
+# ---------------------------------------------------------------------------
+
+@frappe.whitelist()
+def daily_checkins(date: str = None, employee: str = None) -> dict:
+    """Get all check-in records for a specific date.
+    
+    Returns a list of employees with their check-in/out times, hours, and status.
+    """
+    frappe.only_for(ALLOWED_ROLES)
+    if not date:
+        frappe.throw(_("Date is required"))
+
+    from kreativ_attendance.attendance.calendar_util import period_bounds
+    
+    # Get all active employees
+    emp_filters = {"status": "Active"}
+    if employee:
+        emp_filters["name"] = ["like", f"%{employee}%"]
+    
+    employees = frappe.get_all("Employee", filters=emp_filters, 
+                               fields=["name", "employee_name", "department", "default_shift", "user_id"])
+    
+    # Get checkins for the date
+    checkins = frappe.get_all("Employee Checkin",
+        filters=[
+            ["time", ">=", f"{date} 00:00:00"],
+            ["time", "<=", f"{date} 23:59:59"],
+        ],
+        fields=["employee", "time", "log_type", "device_id", "name"],
+        order_by="employee, time"
+    )
+    
+    # Group checkins by employee
+    checkins_by_emp = {}
+    for c in checkins:
+        if c.employee not in checkins_by_emp:
+            checkins_by_emp[c.employee] = []
+        checkins_by_emp[c.employee].append(c)
+    
+    # Build rows
+    rows = []
+    stats = {"total_employees": 0, "checked_in": 0, "not_checked_in": 0, "missing_checkout": 0}
+    
+    for emp in employees:
+        emp_checkins = checkins_by_emp.get(emp.name, [])
+        
+        # Find first IN and last OUT
+        in_punches = [c for c in emp_checkins if c.log_type == "IN"]
+        out_punches = [c for c in emp_checkins if c.log_type == "OUT"]
+        
+        check_in = in_punches[0]["time"] if in_punches else None
+        check_out = out_punches[-1]["time"] if out_punches else None
+        
+        # Calculate hours
+        work_hours = "—"
+        if check_in and check_out:
+            from datetime import datetime
+            dt_in = datetime.fromisoformat(str(check_in).replace("Z", "+00:00"))
+            dt_out = datetime.fromisoformat(str(check_out).replace("Z", "+00:00"))
+            diff = dt_out - dt_in
+            total_seconds = int(diff.total_seconds())
+            h = total_seconds // 3600
+            m = (total_seconds % 3600) // 60
+            work_hours = f"{h:02d}:{m:02d}"
+        
+        # Determine status
+        if check_in and check_out:
+            status = "Present"
+            stats["checked_in"] += 1
+        elif check_in and not check_out:
+            status = "Missing Check-out"
+            stats["missing_checkout"] += 1
+        else:
+            status = "Absent"
+            stats["not_checked_in"] += 1
+        
+        stats["total_employees"] += 1
+        
+        # Get device info
+        devices = list(set(c.device_id for c in emp_checkins if c.device_id))
+        
+        rows.append({
+            "employee": emp.name,
+            "employee_name": emp.employee_name,
+            "department": emp.department,
+            "shift": emp.default_shift,
+            "check_in": check_in,
+            "check_out": check_out,
+            "work_hours": work_hours,
+            "status": status,
+            "device": ", ".join(devices),
+        })
+    
+    return {"rows": rows, "stats": stats}
