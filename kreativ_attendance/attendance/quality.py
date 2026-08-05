@@ -99,6 +99,7 @@ def get_month_issues(year: int, month: int, employee: str = None) -> dict:
         filters=base_filters + [
             ["status", "in", ["Paired", "Manual"]],
             ["worked_seconds", ">", threshold],
+            ["long_session_verified", "!=", 1],
         ],
         fields=["name", "employee", "employee_name", "shift_date",
                 "worked_hours", "worked_seconds"],
