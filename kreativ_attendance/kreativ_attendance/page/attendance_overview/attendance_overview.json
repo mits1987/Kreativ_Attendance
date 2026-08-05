@@ -1,0 +1,21 @@
+{
+ "content": null,
+ "docstatus": 0,
+ "doctype": "Page",
+ "icon": "table",
+ "modified": "2026-08-03 00:00:00.000000",
+ "module": "Kreativ Attendance",
+ "name": "attendance-overview",
+ "owner": "Administrator",
+ "page_name": "attendance-overview",
+ "roles": [
+  {"role": "System Manager"},
+  {"role": "HR Manager"},
+  {"role": "HR User"}
+ ],
+ "script": null,
+ "standard": "Yes",
+ "style": null,
+ "system_page": 0,
+ "title": "Attendance Overview"
+}
