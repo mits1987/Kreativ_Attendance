@@ -311,3 +311,22 @@ def recalculate_for_checkin(checkin_name: str) -> dict:
     else:
         prev = recalculate_employee_for_period(c.employee, prev_year, prev_month)
     return {"current": result, "previous": prev}
+
+
+def create_checkin(employee: str, log_type: str, time: datetime = None) -> dict:
+    """Create an Employee Checkin record for the given employee."""
+    if time is None:
+        time = datetime.now()
+
+    doc = frappe.get_doc({
+        "doctype": "Employee Checkin",
+        "employee": employee,
+        "time": time,
+        "log_type": log_type.upper(),
+    })
+    doc.insert(ignore_permissions=True)
+
+    # Trigger recalculation for this checkin's month
+    recalculate_for_checkin(doc.name)
+
+    return {"name": doc.name, "time": doc.time, "log_type": doc.log_type}
