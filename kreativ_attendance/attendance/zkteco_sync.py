@@ -393,9 +393,10 @@ def sync_zkteco_transactions():
 
     except Exception as e:
         _increment_failure_streak()
-        if _check_circuit_breaker():
-            _disable_sync()
-        frappe.log_error(f"ZKTeco sync failed: {str(e)}", "ZKTeco Sync Fatal Error")
+        streak = frappe.cache().get_value(ZKTECO_FAILURE_CACHE_KEY) or 0
+        frappe.log_error(
+            f"ZKTeco sync failed (streak: {streak}): {str(e)}", "ZKTeco Sync Fatal Error"
+        )
 
 
 def scheduled_sync():
