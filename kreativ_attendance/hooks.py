@@ -16,6 +16,13 @@ override_doctype_class = {
     "Salary Slip": "kreativ_attendance.attendance.salary_slip_override.KGSalarySlip"
 }
 
+# Override zkteco_checkins_sync's test_connection which uses a stale stored token.
+# Our version authenticates fresh each time (JWT or basic token fallback).
+override_whitelisted_methods = {
+    "zkteco_checkins_sync.zkteco_checkin_sync.doctype.zkteco_config.zkteco_config.test_connection":
+        "kreativ_attendance.attendance.zkteco_sync.test_connection",
+}
+
 # DocType list_js
 doctype_list_js = {
     "KG Employee Attendance Shift": "public/js/kg_employee_attendance_shift_list.js"

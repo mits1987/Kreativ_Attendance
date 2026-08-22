@@ -424,3 +424,174 @@ def scheduled_sync():
         frappe.log_error(
             f"Scheduled ZKTeco sync failed: {str(e)}", "ZKTeco Scheduled Sync Error"
         )
+
+
+# ---------------------------------------------------------------------------
+# Test Connection override — replaces zkteco_checkins_sync's stale-token version
+# ---------------------------------------------------------------------------
+
+def _get_fresh_token():
+    """Obtain a fresh auth token from the ZKTeco server (JWT or basic)."""
+    cfg = frappe.get_single("ZKTeco Config")
+    server_ip = cfg.server_ip
+    server_port = cfg.server_port
+    username = cfg.username
+    password = cfg.get_password("password")
+
+    if not all([server_ip, server_port, username, password]):
+        return None, None, _("Missing server credentials in ZKTeco Config.")
+
+    # Try JWT endpoint first
+    try:
+        resp = requests.post(
+            f"http://{server_ip}:{server_port}/api/jwt-api-token-auth/",
+            json={"username": username, "password": password},
+            timeout=15,
+        )
+        if resp.ok:
+            data = resp.json()
+            access = data.get("access", "")
+            if access:
+                frappe.db.set_single_value("ZKTeco Config", "token", access)
+                frappe.db.commit()
+                return access, "JWT", None
+    except Exception:
+        pass
+
+    # Fallback to basic token endpoint
+    try:
+        resp = requests.post(
+            f"http://{server_ip}:{server_port}/api-token-auth/",
+            json={"username": username, "password": password},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        token = resp.json().get("token", "")
+        if token:
+            frappe.db.set_single_value("ZKTeco Config", "token", token)
+            frappe.db.commit()
+            return token, "Token", None
+    except Exception as e:
+        return None, None, str(e)
+
+    return None, None, _("Could not authenticate with ZKTeco server.")
+
+
+@frappe.whitelist()
+def test_connection():
+    """Fresh-auth test connection — replaces zkteco_checkins_sync's stale-token version."""
+    cfg = frappe.get_single("ZKTeco Config")
+    server_ip = cfg.server_ip
+    server_port = cfg.server_port
+
+    token, token_type, auth_error = _get_fresh_token()
+    if not token:
+        return {"ok": False, "error": auth_error}
+
+    base_url = f"http://{server_ip}:{server_port}/iclock/api/transactions/"
+    day = today()
+    start_time = f"{day} 00:00:00"
+    end_time = f"{day} 23:59:59"
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"{token_type} {token}",
+    }
+    params = {
+        "start_time": start_time,
+        "end_time": end_time,
+    }
+
+    try:
+        resp = requests.get(base_url, headers=headers, params=params, timeout=15)
+
+        if resp.ok:
+            try:
+                data = resp.json()
+
+                formatted_transactions = []
+                transaction_count = 0
+
+                if isinstance(data, dict) and "data" in data:
+                    transactions = data["data"]
+                    transaction_count = data.get("count", len(transactions))
+                elif isinstance(data, dict) and "results" in data:
+                    transactions = data["results"]
+                    transaction_count = len(transactions)
+                elif isinstance(data, list):
+                    transactions = data
+                    transaction_count = len(transactions)
+                else:
+                    transactions = []
+
+                for transaction in transactions[:5]:
+                    try:
+                        emp_code = transaction.get("emp_code")
+                        punch_time = transaction.get("punch_time")
+                        punch_state = transaction.get("punch_state")
+                        device_id = transaction.get("terminal_alias") or transaction.get("terminal_sn")
+                        first_name = transaction.get("first_name", "")
+                        last_name = transaction.get("last_name", "") or ""
+                        zkteco_name = f"{first_name} {last_name}".strip()
+
+                        employee_name = zkteco_name
+                        erpnext_employee = None
+                        if emp_code:
+                            employee = frappe.db.get_value(
+                                "Employee", {"employee": emp_code}, ["name", "employee_name"]
+                            )
+                            if not employee:
+                                employee = frappe.db.get_value(
+                                    "Employee", {"user_id": emp_code}, ["name", "employee_name"]
+                                )
+                            if employee:
+                                erpnext_employee = employee[0] if isinstance(employee, tuple) else employee
+                                employee_name = (
+                                    f"{employee[1]} (ERPNext)" if isinstance(employee, tuple) else f"{employee} (ERPNext)"
+                                )
+
+                        log_type = "OUT" if punch_state == "1" else "IN"
+
+                        formatted_transactions.append({
+                            "id": transaction.get("id"),
+                            "employee_code": emp_code,
+                            "employee_name": employee_name,
+                            "erpnext_employee": erpnext_employee,
+                            "punch_time": punch_time,
+                            "log_type": log_type,
+                            "device_id": device_id,
+                            "zkteco_name": zkteco_name,
+                        })
+                    except Exception:
+                        continue
+
+                return {
+                    "ok": True,
+                    "status_code": resp.status_code,
+                    "url": resp.url,
+                    "total_transactions": transaction_count,
+                    "transactions_preview": formatted_transactions,
+                    "raw_sample": transactions[:2] if transactions else [],
+                    "message": f"Found {transaction_count} transactions for {day}",
+                }
+
+            except json.JSONDecodeError as e:
+                return {
+                    "ok": False,
+                    "status_code": resp.status_code,
+                    "error": f"Invalid JSON response: {str(e)}",
+                    "raw_response": resp.text[:500],
+                }
+        else:
+            return {
+                "ok": False,
+                "status_code": resp.status_code,
+                "url": resp.url,
+                "error": f"HTTP {resp.status_code}: {resp.text[:200]}",
+            }
+
+    except requests.RequestException as e:
+        return {
+            "ok": False,
+            "error": f"Connection error: {str(e)}",
+        }
