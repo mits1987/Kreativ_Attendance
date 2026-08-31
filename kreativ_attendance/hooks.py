@@ -83,24 +83,24 @@ scheduler_events = {
 #
 # NOTE: whatsapp_retry_count is retired (dispatcher owns retries) but the
 # field is intentionally KEPT so historical data survives and no patch is
-# needed. whatsapp_sent semantics simplified: 0/None=pending, 1=dispatched,
-# 3=invalid number (2 is no longer written).
+# needed. whatsapp_sent is now a Select field: Not Sent/Queued/Delivered/Invalid Number.
 # ---------------------------------------------------------------------------
 custom_fields = {
     "Employee Checkin": [
         {
             "fieldname": "whatsapp_sent",
-            "label": "WhatsApp Sent",
-            "fieldtype": "Int",
+            "label": "WhatsApp Status",
+            "fieldtype": "Select",
             "insert_after": "log_type",
             "read_only": 1,
             "no_copy": 1,
-            "default": 0,
-            "description": "0=pending, 1=handed to dispatcher (see WhatsApp Send Log), 3=invalid number (stop)",
+            "default": "Not Sent",
+            "options": "Not Sent\nQueued\nDelivered\nInvalid Number",
+            "description": "Not Sent → Queued → Delivered. Invalid Number = stop.",
         },
         {
             "fieldname": "whatsapp_retry_count",
-            "label": "WhatsApp Retry Count",
+            "label": "Retry",
             "fieldtype": "Int",
             "insert_after": "whatsapp_sent",
             "read_only": 1,
