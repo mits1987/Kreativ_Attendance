@@ -17,19 +17,40 @@ import requests
 
 JWT_CACHE_KEY = "zkteco_jwt_token"
 ZKTECO_FAILURE_CACHE_KEY = "zkteco_failure_streak"
-MAX_FAILURES = 5
+MAX_FAILURES = 15
+CIRCUIT_RESET_SECONDS = 1800  # auto-reset after 30 minutes
 
 
 def _check_circuit_breaker():
-    """Check if ZKTeco sync circuit breaker is tripped."""
-    streak = frappe.cache().get_value(ZKTECO_FAILURE_CACHE_KEY) or 0
+    """Check if ZKTeco sync circuit breaker is tripped.
+    Auto-resets after CIRCUIT_RESET_SECONDS so transient outages don't block sync all day."""
+    data = frappe.cache().get_value(ZKTECO_FAILURE_CACHE_KEY) or {}
+    if isinstance(data, dict):
+        streak = data.get("streak", 0)
+        tripped_at = data.get("tripped_at")
+    else:
+        streak = data
+        tripped_at = None
+    if streak >= MAX_FAILURES and tripped_at:
+        elapsed = time.time() - tripped_at
+        if elapsed > CIRCUIT_RESET_SECONDS:
+            frappe.logger().info(f"ZKTeco circuit breaker auto-reset after {int(elapsed)}s")
+            _reset_failure_streak()
+            return False
     return streak >= MAX_FAILURES
 
 
 def _increment_failure_streak():
     """Increment failure streak in cache."""
-    current = frappe.cache().get_value(ZKTECO_FAILURE_CACHE_KEY) or 0
-    frappe.cache().set_value(ZKTECO_FAILURE_CACHE_KEY, current + 1, expires_in_sec=86400)
+    data = frappe.cache().get_value(ZKTECO_FAILURE_CACHE_KEY) or {}
+    if isinstance(data, dict):
+        streak = data.get("streak", 0)
+    else:
+        streak = data
+    frappe.cache().set_value(ZKTECO_FAILURE_CACHE_KEY, {
+        "streak": streak + 1,
+        "tripped_at": time.time() if streak + 1 >= MAX_FAILURES else (data.get("tripped_at") if isinstance(data, dict) else None),
+    }, expires_in_sec=86400)
 
 
 def _reset_failure_streak():
@@ -393,7 +414,8 @@ def sync_zkteco_transactions():
 
     except Exception as e:
         _increment_failure_streak()
-        streak = frappe.cache().get_value(ZKTECO_FAILURE_CACHE_KEY) or 0
+        data = frappe.cache().get_value(ZKTECO_FAILURE_CACHE_KEY) or {}
+        streak = data.get("streak", 0) if isinstance(data, dict) else data
         frappe.log_error(
             f"ZKTeco sync failed (streak: {streak}): {str(e)}", "ZKTeco Sync Fatal Error"
         )
