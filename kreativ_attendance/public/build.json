@@ -2,7 +2,6 @@
 	"js/kreativ_attendance.min.js": [
 		"kreativ_attendance/public/js/kg_employee_attendance_shift_list.js",
 		"kreativ_attendance/public/js/kg_employee_attendance_shift_form.js",
-		"kreativ_attendance/kreativ_attendance/page/attendance_overview/attendance_overview.js",
 		"kreativ_attendance/kreativ_attendance/page/attendance_dashboard/attendance_dashboard.js"
 	]
 }

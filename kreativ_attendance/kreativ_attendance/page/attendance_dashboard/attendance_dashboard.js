@@ -14,6 +14,9 @@ frappe.pages['attendance-dashboard'].on_page_load = function(wrapper) {
 	var state = {
 		year: parseInt(now.split('-')[0], 10),
 		month: parseInt(now.split('-')[1], 10),
+		today: now,
+		view: 'monthly',
+		daily_date: now,
 	};
 	var MONTHS = [__('January'), __('February'), __('March'), __('April'),
 		__('May'), __('June'), __('July'), __('August'),
@@ -120,6 +123,8 @@ frappe.pages['attendance-dashboard'].on_page_load = function(wrapper) {
 					+ '<th style="padding:8px 12px; text-align:right; min-width:90px;">' + __('Med') + '</th>'
 					+ '<th style="padding:8px 12px; text-align:right; min-width:90px;">' + __('Other') + '</th>'
 					+ '<th style="padding:8px 12px; text-align:right; min-width:90px;">' + __('OT Amt') + '</th>'
+					+ '<th style="padding:8px 12px; text-align:right; min-width:90px;">' + __('Incentive') + '</th>'
+					+ '<th style="padding:8px 12px; text-align:right; min-width:90px;">' + __('Penalty') + '</th>'
 					+ '<th style="padding:8px 12px; text-align:right; min-width:100px;">' + __('Gross') + '</th>'
 					+ '<th style="padding:8px 12px; text-align:right; min-width:80px;">' + __('PF') + '</th>'
 					+ '<th style="padding:8px 12px; text-align:right; min-width:80px;">' + __('ESI') + '</th>'
@@ -140,6 +145,8 @@ frappe.pages['attendance-dashboard'].on_page_load = function(wrapper) {
 						+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(r.med_payable, {fieldtype:'Currency'}) + '</td>'
 						+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(r.other_payable, {fieldtype:'Currency'}) + '</td>'
 						+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(r.overtime, {fieldtype:'Currency'}) + '</td>'
+						+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(r.incentive, {fieldtype:'Currency'}) + '</td>'
+						+ '<td style="padding:8px 12px; text-align:right;">' + (r.penalty ? frappe.format(r.penalty, {fieldtype:'Currency'}) : '-') + '</td>'
 						+ '<td style="padding:8px 12px; text-align:right; font-weight:600;">' + frappe.format(r.gross, {fieldtype:'Currency'}) + '</td>'
 						+ '<td style="padding:8px 12px; text-align:right;">' + (r.pf ? frappe.format(r.pf, {fieldtype:'Currency'}) : '-') + '</td>'
 						+ '<td style="padding:8px 12px; text-align:right;">' + (r.esi ? frappe.format(r.esi, {fieldtype:'Currency'}) : '-') + '</td>'
@@ -152,11 +159,13 @@ frappe.pages['attendance-dashboard'].on_page_load = function(wrapper) {
 				html += '</tbody><tfoot><tr style="font-weight:700; background:#f0f0f0;">'
 					+ '<td style="padding:8px 12px;" colspan="10">' + __('Total') + ' (' + tot.employees + ' ' + __('employees') + ')</td>'
 					+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(tot.ot_amount, {fieldtype:'Currency'}) + '</td>'
+					+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(tot.incentive || 0, {fieldtype:'Currency'}) + '</td>'
+					+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(tot.penalty || 0, {fieldtype:'Currency'}) + '</td>'
 					+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(tot.gross, {fieldtype:'Currency'}) + '</td>'
 					+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(tot.pf, {fieldtype:'Currency'}) + '</td>'
 					+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(tot.esi, {fieldtype:'Currency'}) + '</td>'
 					+ '<td style="padding:8px 12px; text-align:right;">-</td>'
-					+ '<td style="padding:8px 12px; text-align:right;">-</td>'
+					+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(tot.lwf || 0, {fieldtype:'Currency'}) + '</td>'
 					+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(tot.total_deduction, {fieldtype:'Currency'}) + '</td>'
 					+ '<td style="padding:8px 12px; text-align:right;">' + frappe.format(tot.net, {fieldtype:'Currency'}) + '</td>'
 					+ '</tr></tfoot></table></div>';
@@ -220,6 +229,16 @@ frappe.pages['attendance-dashboard'].on_page_load = function(wrapper) {
 		);
 	});
 
+	// --- View Toggle: Monthly / Daily ---
+	page.add_inner_button(__('Daily Check-ins'), function() {
+		state.view = 'daily';
+		render_daily_view();
+	}, 'view-group');
+	page.add_inner_button(__('Monthly Summary'), function() {
+		state.view = 'monthly';
+		load();
+	}, 'view-group');
+
 	var $body = $('<div class="attendance-dashboard" style="padding: 15px 0;"></div>').appendTo(page.main);
 
 	function card(label, value, color, onclick) {
@@ -238,7 +257,7 @@ frappe.pages['attendance-dashboard'].on_page_load = function(wrapper) {
 		var last_day = frappe.datetime.month_end(state.year + '-' + String(state.month).padStart(2, '0') + '-01');
 		frappe.route_options = {
 			status: ['in', ['Anomaly', 'Missing Check-Out']],
-			start_date: ['between', [state.year + '-' + String(state.month).padStart(2, '0') + '-01', last_day]],
+			shift_date: ['between', [state.year + '-' + String(state.month).padStart(2, '0') + '-01', last_day]],
 		};
 		if (employee) frappe.route_options.employee = employee;
 		frappe.set_route('List', 'KG Employee Attendance Shift', 'List');
@@ -339,6 +358,208 @@ frappe.pages['attendance-dashboard'].on_page_load = function(wrapper) {
 		$table.find('.anomaly-link').on('click', function(e) {
 			e.preventDefault();
 			anomaly_list_route($(this).attr('data-emp'));
+		});
+	}
+
+	// ========================================================================
+	// DAILY CHECK-IN VIEW
+	// ========================================================================
+	function render_daily_view() {
+		$body.empty();
+
+		// Date picker + employee filter
+		var controls = $(
+			'<div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px; align-items:center;">' +
+			'<div style="display:flex; align-items:center; gap:8px;">' +
+			'<label style="font-weight:500;">' + __('Date') + ':</label>' +
+			'<input type="date" id="daily-date-picker" style="padding:6px 10px; border:1px solid var(--border-color); border-radius:4px;">' +
+			'<button class="btn btn-default btn-sm" id="daily-today-btn">' + __('Today') + '</button>' +
+			'<button class="btn btn-default btn-sm" id="daily-prev-btn">&lsaquo;</button>' +
+			'<button class="btn btn-default btn-sm" id="daily-next-btn">&rsaquo;</button>' +
+			'</div>' +
+			'<div style="display:flex; align-items:center; gap:8px;">' +
+			'<label style="font-weight:500;">' + __('Employee') + ':</label>' +
+			'<input type="text" id="daily-emp-filter" placeholder="' + __('Filter by name or ID') + '" style="padding:6px 10px; border:1px solid var(--border-color); border-radius:4px; width:200px;">' +
+			'<button class="btn btn-default btn-sm" id="daily-filter-btn">' + __('Filter') + '</button>' +
+			'</div>' +
+			'<div style="margin-left:auto;">' +
+			'<button class="btn btn-primary btn-sm" id="daily-export-btn">' + __('Export CSV') + '</button>' +
+			'</div>' +
+			'</div>'
+		).appendTo($body);
+
+		// Set default date to today
+		var $datePicker = $('#daily-date-picker');
+		$datePicker.val(state.daily_date);
+
+		// Event handlers
+		$datePicker.on('change', function() {
+			state.daily_date = $(this).val();
+			load_daily_checkins();
+		});
+		$('#daily-today-btn').on('click', function() {
+			state.daily_date = state.today;
+			$datePicker.val(state.daily_date);
+			load_daily_checkins();
+		});
+		$('#daily-prev-btn').on('click', function() {
+			var d = new Date(state.daily_date + 'T00:00:00');
+			d.setDate(d.getDate() - 1);
+			state.daily_date = frappe.datetime.obj_to_str(d);
+			$datePicker.val(state.daily_date);
+			load_daily_checkins();
+		});
+		$('#daily-next-btn').on('click', function() {
+			var d = new Date(state.daily_date + 'T00:00:00');
+			d.setDate(d.getDate() + 1);
+			state.daily_date = frappe.datetime.obj_to_str(d);
+			$datePicker.val(state.daily_date);
+			load_daily_checkins();
+		});
+		$('#daily-emp-filter').on('keypress', function(e) {
+			if (e.which === 13) load_daily_checkins();
+		});
+		$('#daily-filter-btn').on('click', load_daily_checkins);
+		$('#daily-export-btn').on('click', export_daily_csv);
+
+		// Table container
+		$('<div id="daily-checkins-table" style="overflow-x:auto;"></div>').appendTo($body);
+
+		load_daily_checkins();
+	}
+
+	function load_daily_checkins() {
+		var date = state.daily_date;
+		var emp_filter = $('#daily-emp-filter').val().trim();
+
+		$('#daily-checkins-table').html('<div class="text-muted" style="padding:30px;">' + __('Loading...') + '</div>');
+
+		frappe.call({
+			method: 'kreativ_attendance.attendance.api_ui.daily_checkins',
+			args: { date: date, employee: emp_filter || '' },
+			callback: function(r) {
+				var data = r.message || { rows: [], stats: {} };
+				render_daily_table(data);
+			}
+		});
+	}
+
+	function render_daily_table(data) {
+		var rows = data.rows || [];
+		var stats = data.stats || {};
+
+		// Summary cards
+		var $container = $('#daily-checkins-table');
+		$container.empty();
+
+		var summary = $(
+			'<div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:14px;">' +
+			'<div style="flex:1; min-width:150px; background:var(--card-bg, #fff); border:1px solid var(--border-color); border-radius:8px; padding:14px 18px;">' +
+			'<div style="font-size:12px; color:var(--text-muted, #6c7680);">' + __('Total Employees') + '</div>' +
+			'<div style="font-size:22px; font-weight:600;">' + (stats.total_employees || 0) + '</div>' +
+			'</div>' +
+			'<div style="flex:1; min-width:150px; background:var(--card-bg, #fff); border:1px solid var(--border-color); border-radius:8px; padding:14px 18px;">' +
+			'<div style="font-size:12px; color:var(--text-muted, #6c7680);">' + __('Checked In') + '</div>' +
+			'<div style="font-size:22px; font-weight:600; color:#29cd41;">' + (stats.checked_in || 0) + '</div>' +
+			'</div>' +
+			'<div style="flex:1; min-width:150px; background:var(--card-bg, #fff); border:1px solid var(--border-color); border-radius:8px; padding:14px 18px;">' +
+			'<div style="font-size:12px; color:var(--text-muted, #6c7680);">' + __('Not Checked In') + '</div>' +
+			'<div style="font-size:22px; font-weight:600; color:#ff4d4d;">' + (stats.not_checked_in || 0) + '</div>' +
+			'</div>' +
+			'<div style="flex:1; min-width:150px; background:var(--card-bg, #fff); border:1px solid var(--border-color); border-radius:8px; padding:14px 18px;">' +
+			'<div style="font-size:12px; color:var(--text-muted, #6c7680);">' + __('Missing Check-out') + '</div>' +
+			'<div style="font-size:22px; font-weight:600; color:#ff9b00;">' + (stats.missing_checkout || 0) + '</div>' +
+			'</div>' +
+			'</div>'
+		).appendTo($container);
+
+		if (!rows.length) {
+			$container.append('<div class="text-muted" style="padding:30px; text-align:center;">' + __('No check-in records for {0}', [frappe.datetime.str_to_user(state.daily_date)]) + '</div>');
+			return;
+		}
+
+		var html = '<table class="table table-bordered" style="background:var(--card-bg, #fff);">' +
+			'<thead><tr>' +
+			'<th>' + __('Employee ID') + '</th>' +
+			'<th>' + __('Name') + '</th>' +
+			'<th>' + __('Department') + '</th>' +
+			'<th>' + __('Shift') + '</th>' +
+			'<th style="text-align:center">' + __('Check In') + '</th>' +
+			'<th style="text-align:center">' + __('Check Out') + '</th>' +
+			'<th style="text-align:right">' + __('Hours') + '</th>' +
+			'<th style="text-align:center">' + __('Status') + '</th>' +
+			'<th>' + __('Device') + '</th>' +
+			'</tr></thead><tbody>';
+
+		rows.forEach(function(r) {
+			var status_class = '';
+			var status_text = '';
+			if (r.status === 'Present') { status_class = 'style="color:#29cd41; font-weight:600;"'; status_text = __('Present'); }
+			else if (r.status === 'Missing Check-out') { status_class = 'style="color:#ff9b00; font-weight:600;"'; status_text = __('Missing Check-out'); }
+			else if (r.status === 'Absent') { status_class = 'style="color:#ff4d4d; font-weight:600;"'; status_text = __('Absent'); }
+			else { status_text = r.status || ''; }
+
+			var check_in = r.check_in ? frappe.datetime.str_to_user(r.check_in, 'HH:mm:ss') : '—';
+			var check_out = r.check_out ? frappe.datetime.str_to_user(r.check_out, 'HH:mm:ss') : '—';
+
+			html += '<tr' + (r.status === 'Absent' ? ' style="background:#fff4e6;"' : '') + '>' +
+				'<td><a href="/app/employee/' + encodeURIComponent(r.employee) + '">' + frappe.utils.escape_html(r.employee) + '</a></td>' +
+				'<td>' + frappe.utils.escape_html(r.employee_name || '') + '</td>' +
+				'<td>' + frappe.utils.escape_html(r.department || '') + '</td>' +
+				'<td>' + frappe.utils.escape_html(r.shift || '') + '</td>' +
+				'<td style="text-align:center; font-family:monospace;">' + check_in + '</td>' +
+				'<td style="text-align:center; font-family:monospace;">' + check_out + '</td>' +
+				'<td style="text-align:right; font-family:monospace;">' + (r.work_hours || '—') + '</td>' +
+				'<td style="text-align:center;" ' + status_class + '>' + status_text + '</td>' +
+				'<td>' + frappe.utils.escape_html(r.device || '') + '</td>' +
+				'</tr>';
+		});
+
+		html += '</tbody></table>';
+		$container.append(html);
+	}
+
+	function export_daily_csv() {
+		var date = state.daily_date;
+		var emp_filter = $('#daily-emp-filter').val().trim();
+
+		frappe.call({
+			method: 'kreativ_attendance.attendance.api_ui.daily_checkins',
+			args: { date: date, employee: emp_filter || '' },
+			callback: function(r) {
+				var data = r.message || { rows: [] };
+				var rows = data.rows || [];
+
+				if (!rows.length) {
+					frappe.msgprint({ message: __('No data to export'), indicator: 'orange' });
+					return;
+				}
+
+				var csv = ['Employee ID,Employee Name,Department,Shift,Check In,Check Out,Work Hours,Status,Device'];
+				rows.forEach(function(r) {
+					var check_in = r.check_in ? frappe.datetime.str_to_user(r.check_in, 'HH:mm:ss') : '';
+					var check_out = r.check_out ? frappe.datetime.str_to_user(r.check_out, 'HH:mm:ss') : '';
+					csv.push([
+						r.employee || '',
+						(r.employee_name || '').replace(/,/g, ';'),
+						(r.department || '').replace(/,/g, ';'),
+						(r.shift || '').replace(/,/g, ';'),
+						check_in,
+						check_out,
+						r.work_hours || '',
+						r.status || '',
+						(r.device || '').replace(/,/g, ';')
+					].join(','));
+				});
+
+				var blob = new Blob([csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
+				var link = document.createElement('a');
+				link.href = URL.createObjectURL(blob);
+				link.download = 'daily_checkins_' + date + '.csv';
+				document.body.appendChild(link);
+				link.click();
+				document.body.removeChild(link);
+			}
 		});
 	}
 
