@@ -93,8 +93,7 @@ frappe.pages['attendance-dashboard'].on_page_load = function(wrapper) {
 		);
 	});
 	page.add_inner_button(__('Open Full Report'), function() {
-		frappe.route_options = { year: state.year, month: state.month };
-		frappe.set_route('query-report', 'KG Employee Shift Summary');
+		frappe.set_route('query-report', 'KG Employee Shift Summary', { year: state.year, month: state.month });
 	});
 	page.add_inner_button(__('Preview Payroll'), function() {
 		frappe.call({

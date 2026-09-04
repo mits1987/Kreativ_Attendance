@@ -17,6 +17,17 @@ from kreativ_attendance.attendance.pairing import format_hhmm
 WORKED_STATUSES = ("Paired", "Manual")
 
 
+def get_filters():
+    today = frappe.utils.getdate()
+    return [
+        {"fieldname": "year", "label": "Year", "fieldtype": "Int", "default": today.year},
+        {"fieldname": "month", "label": "Month", "fieldtype": "Int", "default": today.month,
+         "options": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12"},
+        {"fieldname": "employee", "label": "Employee", "fieldtype": "Link", "options": "Employee"},
+        {"fieldname": "view", "label": "View", "fieldtype": "Select", "options": "Detail\nSummary", "default": "Detail"},
+    ]
+
+
 def execute(filters=None):
     f = frappe._dict(filters or {})
     today = frappe.utils.getdate()
