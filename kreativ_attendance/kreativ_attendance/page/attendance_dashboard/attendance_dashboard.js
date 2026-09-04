@@ -78,17 +78,19 @@ frappe.pages['attendance-dashboard'].on_page_load = function(wrapper) {
 						if ((m.skipped_locked || []).length) {
 							html += '<br>' + __('Skipped (payroll locked): {0}', [m.skipped_locked.join(', ')]);
 						}
-						frappe.msgprint({ title: __('Recalculate {0}', [m.period]), message: html, indicator: 'green' });
-						load();
+					frappe.msgprint({ title: __('Recalculate {0}', [m.period]), message: html, indicator: 'green' });
+					load();
+					frappe.call({
+						method: 'kreativ_attendance.attendance.api_ui.build_summary',
+						args: { year: state.year, month: state.month },
+					});
 					}
 				});
 			}
 		);
 	});
-	page.add_inner_button(__('Create Payroll Entry'), function() {
-		frappe.new_doc('Payroll Entry');
-	});
 	page.add_inner_button(__('Open Full Report'), function() {
+		frappe.route_options = { year: state.year, month: state.month };
 		frappe.set_route('query-report', 'KG Employee Shift Summary');
 	});
 	page.add_inner_button(__('Preview Payroll'), function() {
