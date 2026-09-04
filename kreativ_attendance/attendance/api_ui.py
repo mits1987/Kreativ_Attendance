@@ -395,7 +395,7 @@ def daily_checkins(date: str = None, employee: str = None) -> dict:
         
         # Calculate hours
         work_hours = "—"
-        if check_in and check_out:
+        if check_in and check_out and check_out > check_in:
             from datetime import datetime
             dt_in = datetime.fromisoformat(str(check_in).replace("Z", "+00:00"))
             dt_out = datetime.fromisoformat(str(check_out).replace("Z", "+00:00"))
@@ -404,6 +404,9 @@ def daily_checkins(date: str = None, employee: str = None) -> dict:
             h = total_seconds // 3600
             m = (total_seconds % 3600) // 60
             work_hours = f"{h:02d}:{m:02d}"
+        elif check_in and check_out and check_out <= check_in:
+            # OUT belongs to previous shift — only IN for today
+            check_out = None
         
         # Determine status
         if check_in and check_out:
