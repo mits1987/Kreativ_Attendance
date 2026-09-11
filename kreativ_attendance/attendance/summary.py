@@ -94,7 +94,11 @@ def get_rate_of_wages(employee: str, on_date) -> float:
 
 
 def aggregate_hours(year: int, month: int, employee: str = None) -> dict:
-    """Return {employee: {'total_hours', 'shift_count', 'anomaly_count'}}."""
+    """Return {employee: {'total_hours', 'capped_hours', 'shift_count', 'anomaly_count'}}.
+
+    total_hours = raw sum (used for OT amount).
+    capped_hours = each shift capped at standard_hours (used for PD calculation).
+    """
     start, end = period_bounds(year, month)
     filters = [["shift_date", ">=", start], ["shift_date", "<", end]]
     if employee:
@@ -104,18 +108,27 @@ def aggregate_hours(year: int, month: int, employee: str = None) -> dict:
         SHIFT_DOCTYPE, filters=filters,
         fields=["employee", "status", "worked_seconds"],
     )
+
+    std_map, std_default = get_standard_hours_map()
+
     out = {}
     for r in rows:
         d = out.setdefault(r["employee"], {
-            "total_hours": 0.0, "shift_count": 0, "anomaly_count": 0,
+            "total_hours": 0.0, "capped_hours": 0.0,
+            "shift_count": 0, "anomaly_count": 0,
         })
         if r["status"] in WORKED_STATUSES:
-            d["total_hours"] += float(r.get("worked_seconds") or 0) / 3600.0
+            raw_secs = float(r.get("worked_seconds") or 0)
+            d["total_hours"] += raw_secs / 3600.0
+            std, _ = std_map.get(r["employee"], (std_default, ""))
+            max_secs = float(std) * 3600.0
+            d["capped_hours"] += min(raw_secs, max_secs) / 3600.0
             d["shift_count"] += 1
         elif r["status"] in ANOMALY_STATUSES:
             d["anomaly_count"] += 1
     for d in out.values():
         d["total_hours"] = round(d["total_hours"], 2)
+        d["capped_hours"] = round(d["capped_hours"], 2)
     return out
 
 
@@ -155,9 +168,18 @@ def build_month(year: int, month: int, employee: str = None) -> dict:
 
         cal = calendar_for_employee(emp, year, month)
         derived = compute_attendance(
-            total_hours=agg["total_hours"], standard_hours=std, wd=cal["wd"]
+            total_hours=agg["capped_hours"], standard_hours=std, wd=cal["wd"]
         )
         row = get_rate_of_wages(emp, on_date)
+
+        absent_days = max(0.0, float(cal["wd"] or 0) - derived["pd"])
+        wo_deduction = 0.0
+        if kg_settings.absent_deduction_enabled():
+            ratio = kg_settings.absent_deduction_ratio()
+            if ratio > 0:
+                wo_deduction = min(absent_days // ratio, float(cal["wo"] or 0))
+        effective_wo = float(cal["wo"] or 0) - wo_deduction
+
         values = {
             "employee": emp,
             "period_year": year,
@@ -167,6 +189,8 @@ def build_month(year: int, month: int, employee: str = None) -> dict:
             "days_in_month": cal["days_in_month"],
             "wd": cal["wd"],
             "wo": cal["wo"],
+            "wo_deduction": wo_deduction,
+            "effective_wo": effective_wo,
             "ph": cal["ph"],
             "holiday_list": cal["holiday_list"],
             "standard_hours": std,
@@ -176,7 +200,7 @@ def build_month(year: int, month: int, employee: str = None) -> dict:
             "shift_count": agg["shift_count"],
             "anomaly_count": agg["anomaly_count"],
             "pd": derived["pd"],
-            "pay_days": compute_pay_days(derived["pd"], cal["wo"], cal["ph"]),
+            "pay_days": compute_pay_days(derived["pd"], effective_wo, cal["ph"]),
             "ot_hours": derived["ot_hours"],
             "rate_of_wages": row,
             "ot_amount": compute_overtime_amount(

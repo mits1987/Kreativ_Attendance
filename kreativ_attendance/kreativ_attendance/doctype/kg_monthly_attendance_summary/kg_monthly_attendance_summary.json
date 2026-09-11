@@ -12,7 +12,7 @@
   "sort_field": "modified",
   "sort_order": "DESC",
   "track_changes": 1,
-  "field_order": [
+    "field_order": [
     "employee",
     "employee_name",
     "department",
@@ -25,6 +25,8 @@
     "days_in_month",
     "wd",
     "wo",
+    "wo_deduction",
+    "effective_wo",
     "column_break_cal",
     "ph",
     "holiday_list",
@@ -71,6 +73,8 @@
     {"fieldname": "days_in_month", "fieldtype": "Int", "read_only": 1, "label": "Days in Month", "description": "Calendar days. This is the proration divisor."},
     {"fieldname": "wd", "fieldtype": "Float", "precision": "2", "label": "WD (Working Days)"},
     {"fieldname": "wo", "fieldtype": "Float", "precision": "2", "label": "WO (Weekly Offs)"},
+    {"fieldname": "wo_deduction", "fieldtype": "Float", "precision": "2", "read_only": 1, "label": "WO Deduction", "description": "Absent days // ratio, capped at WO"},
+    {"fieldname": "effective_wo", "fieldtype": "Float", "precision": "2", "read_only": 1, "label": "Effective WO", "description": "WO minus deduction"},
     {"fieldname": "column_break_cal", "fieldtype": "Column Break"},
     {"fieldname": "ph", "fieldtype": "Float", "precision": "2", "default": "0", "label": "PH (Public Holidays)"},
     {"fieldname": "holiday_list", "fieldtype": "Link", "options": "Holiday List", "read_only": 1, "label": "Holiday List Used"},

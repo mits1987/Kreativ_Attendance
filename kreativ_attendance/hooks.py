@@ -50,6 +50,9 @@ doc_events = {
         "on_change": "kreativ_attendance.attendance.hooks.on_checkin_updated",
         "on_trash": "kreativ_attendance.attendance.hooks.on_checkin_trashed",
     },
+    "Employee": {
+        "validate": "kreativ_attendance.attendance.hooks.on_employee_validate",
+    },
     "Salary Slip": {
         # Payroll lock only. WhatsApp delivery: kreativ_notification.
         "on_submit": "kreativ_attendance.attendance.hooks.on_salary_slip_submit",

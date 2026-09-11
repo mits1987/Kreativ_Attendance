@@ -77,6 +77,15 @@ def ot_rate_base() -> str:
     return get("ot_rate_base", "Rate of Wages") or "Rate of Wages"
 
 
+def absent_deduction_enabled() -> bool:
+    return bool(int(get("absent_deduction_enabled", 0) or 0))
+
+
+def absent_deduction_ratio() -> int:
+    """For every N absent days, deduct 1 WO from pay_days. 0 = disabled."""
+    return int(get("absent_days_per_deduction", 0) or 0)
+
+
 def set_state(period: str, status: str):
     """Record the outcome of the last monthly close."""
     from frappe.utils import now_datetime

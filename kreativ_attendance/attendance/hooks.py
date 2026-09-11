@@ -23,6 +23,17 @@ def on_checkin_trashed(doc, method=None):
     _enqueue_recalc(doc)
 
 
+def on_employee_validate(doc, method=None):
+    """Auto-compute kg_gross = sum of salary components on Employee save."""
+    doc.kg_gross = (
+        float(doc.kg_basic or 0)
+        + float(doc.kg_hra or 0)
+        + float(doc.kg_conveyance or 0)
+        + float(doc.kg_medical or 0)
+        + float(doc.kg_other or 0)
+    )
+
+
 def _enqueue_recalc(doc):
     # Deduplicate per employee-month: a 5-minute device sync inserts many
     # checkins for the same employee, and each full-month rebuild is
