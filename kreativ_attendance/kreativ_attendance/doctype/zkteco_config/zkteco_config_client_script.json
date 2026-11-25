@@ -1,0 +1,6 @@
+{
+  "doctype": "Client Script",
+  "name": "ZKTeco Config",
+  "dt": "ZKTeco Config",
+  "script": "// Copyright (c) 2026, Mitesh and contributors\n// For license information, please see license.txt\n\nfrappe.ui.form.on(\"ZKTeco Config\", {\n\trefresh(frm) {\n\t\t// Test Connection button handler\n\t\tfrm.set_df_property(\"test_connection\", \"onclick\", () => {\n\t\t\tfrm.call(\"test_connection\").then((r) => {\n\t\t\t\tif (r.message) {\n\t\t\t\t\tif (r.message.ok) {\n\t\t\t\t\t\tfrappe.msgprint({\n\t\t\t\t\t\t\ttitle: __(\"Connection Successful\"),\n\t\t\t\t\t\t\tmessage: `Connected successfully! Found ${r.message.total_transactions} transactions for today.<br>\n\t\t\t\t\t\t\t\t\t  Status: ${r.message.status_code}<br>\n\t\t\t\t\t\t\t\t\t  URL: ${r.message.url}`,\n\t\t\t\t\t\t\tindicator: \"green\"\n\t\t\t\t\t\t});\n\t\t\t\t\t} else {\n\t\t\t\t\t\tfrappe.msgprint({\n\t\t\t\t\t\t\ttitle: __(\"Connection Failed\"),\n\t\t\t\t\t\t\tmessage: r.message.error || \"Unknown error\",\n\t\t\t\t\t\t\tindicator: \"red\"\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t});\n\t\t}\n\t},\n});"
+}

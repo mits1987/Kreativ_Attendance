@@ -2,7 +2,7 @@
 Employee Checkin records in ERPNext.
 
 Moved here from zkteco_checkins_sync so the logic lives in kreativ_attendance.
-The ZKTeco Config doctype stays in zkteco_checkins_sync (already in DB).
+The ZKTeco Config doctype now lives in this app too.
 """
 import base64
 import json
